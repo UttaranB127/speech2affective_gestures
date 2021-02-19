@@ -188,7 +188,7 @@ class Processor(object):
         i = 0
         for k, v in self.epoch_info.items():
             self.io.print_log('\t{}: {}. Best so far: {:.4f} (epoch: {:d}).'.
-                              format(k, v, best_metrics[i] * 100., print_epochs[i]))
+                              format(k, v, best_metrics[i], print_epochs[i]))
             i += 1
         if self.args.pavi_log:
             self.io.log('train', self.meta_info['iter'], self.epoch_info)

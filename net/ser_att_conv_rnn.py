@@ -1,3 +1,5 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import GRU
@@ -10,17 +12,18 @@ def truncate_param(param, value):
 
 
 class Attention(nn.Module):
-    def __init__(self, hidden_size, attention_size, bidirectional):
+    def __init__(self, hidden_size, attention_size, bidirectional,
+                 init_std=0.1, init_const=0.1):
         super(Attention, self).__init__()
 
         if bidirectional:
             hidden_size *= 2
         self.linear1 = nn.Linear(hidden_size, attention_size)
-        nn.init.normal(self.linear1.weight, std=0.1)
-        nn.init.constant(self.linear1.bias, 0.1)
+        nn.init.normal(self.linear1.weight, std=init_std)
+        nn.init.constant(self.linear1.bias, init_const)
         self.linear2 = nn.Linear(attention_size, 1)
-        nn.init.normal(self.linear2.weight, std=0.1)
-        nn.init.constant(self.linear2.bias, 0.1)
+        nn.init.normal(self.linear2.weight, std=init_std)
+        nn.init.constant(self.linear2.bias, init_const)
 
     def forward(self, x):
         v = torch.sigmoid(self.linear1(x))
@@ -30,7 +33,7 @@ class Attention(nn.Module):
 
 
 class AttConvRNN(nn.Module):
-    def __init__(self, C, H, W, D, L1=5, L2=7,
+    def __init__(self, C, H, W, EC, L1=128, L2=256,
                  gru_cell_units=128,
                  attention_size=1,
                  num_linear=768,
@@ -39,8 +42,8 @@ class AttConvRNN(nn.Module):
                  F1=64,
                  bidirectional=True,
                  dropout_keep_prob=1,
-                 init_std=0.1,
-                 init_const=0.1):
+                 init_std=0.001,
+                 init_const=0.001):
         super(AttConvRNN, self).__init__()
 
         self.conv1 = nn.Conv2d(C, L1, (5, 3), padding=(2, 1))
@@ -78,18 +81,21 @@ class AttConvRNN(nn.Module):
         nn.init.constant(self.linear1.bias, init_const)
 
         self.gru = nn.GRU(num_linear, gru_cell_units, batch_first=True, bidirectional=bidirectional)
-        bias_len = len(self.gru.bias_hh_l0)
-        nn.init.constant(self.gru.bias_hh_l0[bias_len // 4:bias_len // 2], 1.)
-        nn.init.constant(self.gru.bias_hh_l0_reverse[bias_len // 4:bias_len // 2], 1.)
-        nn.init.constant(self.gru.bias_ih_l0[bias_len // 4:bias_len // 2], 1.)
-        nn.init.constant(self.gru.bias_ih_l0_reverse[bias_len // 4:bias_len // 2], 1.)
-        self.attention = Attention(gru_cell_units, attention_size=attention_size, bidirectional=bidirectional)
+        # bias_len = len(self.gru.bias_hh_l0)
+        # nn.init.constant(self.gru.bias_hh_l0[bias_len // 4:bias_len // 2], 1.)
+        # nn.init.constant(self.gru.bias_hh_l0_reverse[bias_len // 4:bias_len // 2], 1.)
+        # nn.init.constant(self.gru.bias_ih_l0[bias_len // 4:bias_len // 2], 1.)
+        # nn.init.constant(self.gru.bias_ih_l0_reverse[bias_len // 4:bias_len // 2], 1.)
+        self.attention = Attention(gru_cell_units,
+                                   attention_size=attention_size,
+                                   bidirectional=bidirectional,
+                                   init_std=init_std, init_const=init_const)
 
-        self.linear2 = nn.Linear(gru_cell_units * 2 if bidirectional else 1, F1)
+        self.linear2 = nn.Linear(gru_cell_units * (2 if bidirectional else 1), F1)
         nn.init.normal(self.linear2.weight, std=init_std)
         self.linear2.weight.data = truncate_param(self.linear2.weight, init_std * 2.)
         nn.init.constant(self.linear2.bias, init_const)
-        self.linear3 = nn.Linear(F1, D)
+        self.linear3 = nn.Linear(F1, EC)
         nn.init.normal(self.linear3.weight, std=init_std)
         self.linear3.weight.data = truncate_param(self.linear3.weight, init_std * 2.)
         nn.init.constant(self.linear3.bias, init_const)
@@ -105,12 +111,18 @@ class AttConvRNN(nn.Module):
         x_06 = self.leaky_relu(self.conv5(x_05))
         x_07 = self.leaky_relu(self.conv6(x_06)).permute(0, 2, 1, 3)
         x_08 = self.leaky_relu(self.linear1(x_07.contiguous().view(x_07.shape[0], x_07.shape[1], -1)))
-        x_09, _ = self.gru(x_08)
-        x_10, alphas = self.attention(x_09)
+        # x_09, _ = self.gru(x_08)
+        # x_10, alphas = self.attention(x_09)
+        x_10, alphas = self.attention(x_08)
         x_11 = self.leaky_relu(self.linear2(x_10))
-        x_12 = torch.clamp(self.linear3(x_11), -3., 3.)
+        x_12 = self.linear3(x_11)
 
         # if torch.max(x_12[0] - x_12[1]) < 1e-3 and torch.min(x_12[0] - x_12[1]) < 1e-3:
         #     stop
+        # var = x_11
+        # print([torch.max(var), torch.min(var), torch.mean(var), torch.std(var)])
+        # print([torch.max(torch.abs(var[0] - var[1])), torch.min(torch.abs(var[0] - var[1])),
+        #        torch.mean(torch.abs(var[0] - var[1])), torch.std(torch.abs(var[0] - var[1]))])
+        # torch.max(torch.abs(x_12[0] - x_12[1])) < 1e-5 and torch.min(torch.abs(x_12[0] - x_12[1])) < 1e-5
 
         return x_12

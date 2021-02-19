@@ -17,6 +17,7 @@ from os.path import join as j
 from scipy.io import wavfile
 from tqdm import tqdm
 
+emotions_names_cat = ['neu', 'hap', 'exc', 'sur', 'fea', 'sad', 'dis', 'ang', 'fru', 'oth']
 nrc_vad_lexicon_file = '../../data/NRC-VAD-Lexicon-Aug2018Release/NRC-VAD-Lexicon.txt'
 nrc_vad_lexicon = {}
 
@@ -134,15 +135,23 @@ def load_data():
     return mean1, std1, mean2, std2, mean3, std3
 
 
+def extract_categorical_emotions(string):
+    if string == 'xxx':
+        string = 'oth'
+    emotions_cat = np.zeros(len(emotions_names_cat), dtype=int)
+    emotions_cat[emotions_names_cat.index(string)] = 1
+    return emotions_cat
+
+
 def extract_dimensional_emotions(string):
     # a: dimensional emotion, c: categorical emotion
     # e: evaluator, f/m: self-reported
     if string[:3].lower() == 'a-e':
-        emotions = string.split()
-        emotions = [0. if emotions[i] == ';'
-                    else float(emotions[i].split(';')[0])
+        emotions_dim = string.split()
+        emotions_dim = [0. if emotions_dim[i] == ';'
+                    else float(emotions_dim[i].split(';')[0])
                     for i in [2, 4, 6]]
-        return emotions
+        return emotions_dim
     return []
 
 
@@ -162,17 +171,23 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
     train_data_wav_file = j(processed_dir, 'train_data_wav.npz')
     eval_data_wav_file = j(processed_dir, 'eval_data_wav.npz')
     test_data_wav_file = j(processed_dir, 'test_data_wav.npz')
-    train_labels_file = j(processed_dir, 'train_labels.npz')
-    eval_labels_file = j(processed_dir, 'eval_labels.npz')
-    test_labels_file = j(processed_dir, 'test_labels.npz')
+    train_labels_cat_file = j(processed_dir, 'train_labels_cat.npz')
+    eval_labels_cat_file = j(processed_dir, 'eval_labels_cat.npz')
+    test_labels_cat_file = j(processed_dir, 'test_labels_cat.npz')
+    train_labels_dim_file = j(processed_dir, 'train_labels_dim.npz')
+    eval_labels_dim_file = j(processed_dir, 'eval_labels_dim.npz')
+    test_labels_dim_file = j(processed_dir, 'test_labels_dim.npz')
     stats_file = j(processed_dir, 'stats.pkl')
 
     if not (os.path.exists(train_data_wav_file)
             and os.path.exists(eval_data_wav_file)
             and os.path.exists(test_data_wav_file)
-            and os.path.exists(train_data_wav_file)
-            and os.path.exists(eval_data_wav_file)
-            and os.path.exists(test_data_wav_file)
+            and os.path.exists(train_labels_cat_file)
+            and os.path.exists(eval_labels_cat_file)
+            and os.path.exists(test_labels_cat_file)
+            and os.path.exists(train_labels_dim_file)
+            and os.path.exists(eval_labels_dim_file)
+            and os.path.exists(test_labels_dim_file)
             and os.path.exists(stats_file)):
 
         session_set_train = [1, 2, 3, 4]
@@ -180,7 +195,8 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         data_wav_list_1 = []
         data_wav_list_2 = []
         data_wav_list_3 = []
-        labels_list = []
+        labels_cat_list = []
+        labels_dim_list = []
         data_count = 0
         train_idx = []
         eval_idx = []
@@ -199,18 +215,21 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
                     continue
                 # impro: improvisation, script: scripted
                 emo_file = j(emo_dir, sess + '.txt')
-                emotions = []
+                emotions_cat = []
+                emotions_dim = []
                 with open(emo_file, 'r') as ef:
                     ef_lines = ef.readlines()
                     for ef_line in ef_lines:
                         if ef_line[0] == '[':
-                            emotions.append([float(x) for x in re.findall('\d+\.\d+', ef_line)[-3:]])
+                            emotions_cat.append(extract_categorical_emotions(ef_line.split()[4]))
+                            emotions_dim.append([float(x) for x in re.findall('\d+\.\d+', ef_line)[-3:]])
 
                         # extract_dimensional_emotions(ef_line)
 
                 wav_files = glob.glob(j(wav_dir, sess, '*.wav'))
                 num_wav_files = len(wav_files)
-                assert num_wav_files == len(emotions), 'Number of annotations do not match number of .wav files'
+                assert num_wav_files == len(emotions_cat), 'Number of annotations do not match number of .wav files'
+                assert num_wav_files == len(emotions_dim), 'Number of annotations do not match number of .wav files'
                 for wav_idx, wav_file_name in enumerate(wav_files):
                     data, time, rate = read_wav_file(wav_file_name)
                     mel_spec = ps.logfbank(data, rate, nfilt=filter_num)
@@ -235,7 +254,8 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
                         data_wav_list_2.append(delta11.tolist())
                         data_wav_list_3.append(delta21.tolist())
 
-                        labels_list.append(emotions[wav_idx])
+                        labels_cat_list.append(emotions_cat[wav_idx])
+                        labels_dim_list.append(emotions_dim[wav_idx])
 
                         data_count += 1
                     else:
@@ -257,7 +277,8 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
                             data_wav_list_2.append(delta11.tolist())
                             data_wav_list_3.append(delta21.tolist())
 
-                            labels_list.append(emotions[wav_idx])
+                            labels_cat_list.append(emotions_cat[wav_idx])
+                            labels_dim_list.append(emotions_dim[wav_idx])
 
                             data_count += 1
                             # data_wav_list_1.append(part_from_last.tolist())
@@ -288,31 +309,53 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         test_data_wav_2 = np.array([data_wav_list_2[i] for i in test_idx])
         test_data_wav_3 = np.array([data_wav_list_3[i] for i in test_idx])
 
-        train_labels = \
-            np.array([labels_list[i] for i in train_idx]) - (dimensional_max - dimensional_min) / 2.
-        eval_labels = \
-            np.array([labels_list[i] for i in eval_idx]) - (dimensional_max - dimensional_min) / 2.
-        test_labels = \
-            np.array([labels_list[i] for i in test_idx]) - (dimensional_max - dimensional_min) / 2.
+        train_labels_cat = np.array([labels_cat_list[i] for i in train_idx])
+        eval_labels_cat = np.array([labels_cat_list[i] for i in eval_idx])
+        test_labels_cat = np.array([labels_cat_list[i] for i in test_idx])
 
-        mean1 = np.mean(train_data_wav_1, axis=(0, 1))
-        std1 = np.std(train_data_wav_1, axis=(0, 1))
-        mean2 = np.mean(train_data_wav_2, axis=(0, 1))
-        std2 = np.std(train_data_wav_2, axis=(0, 1))
-        mean3 = np.mean(train_data_wav_3, axis=(0, 1))
-        std3 = np.std(train_data_wav_3, axis=(0, 1))
+        train_labels_dim = \
+            (np.array([labels_dim_list[i] for i in train_idx]) - dimensional_min) / (dimensional_max - dimensional_min)
+        eval_labels_dim = \
+            (np.array([labels_dim_list[i] for i in eval_idx]) - dimensional_min) / (dimensional_max - dimensional_min)
+        test_labels_dim = \
+            (np.array([labels_dim_list[i] for i in test_idx]) - dimensional_min) / (dimensional_max - dimensional_min)
 
-        train_data_wav = np.moveaxis(np.array([(train_data_wav_1 - mean1) / (std1 + epsilon),
-                                               (train_data_wav_2 - mean2) / (std2 + epsilon),
-                                               (train_data_wav_3 - mean3) / (std3 + epsilon)]),
+        # mean1 = np.mean(train_data_wav_1, axis=(0, 1))
+        # std1 = np.std(train_data_wav_1, axis=(0, 1))
+        # mean2 = np.mean(train_data_wav_2, axis=(0, 1))
+        # std2 = np.std(train_data_wav_2, axis=(0, 1))
+        # mean3 = np.mean(train_data_wav_3, axis=(0, 1))
+        # std3 = np.std(train_data_wav_3, axis=(0, 1))
+        # train_data_wav = np.moveaxis(np.array([(train_data_wav_1 - mean1) / (std1 + epsilon),
+        #                                        (train_data_wav_2 - mean2) / (std2 + epsilon),
+        #                                        (train_data_wav_3 - mean3) / (std3 + epsilon)]),
+        #                              0, 1)
+        # eval_data_wav = np.moveaxis(np.array([(eval_data_wav_1 - mean1) / (std1 + epsilon),
+        #                                       (eval_data_wav_2 - mean2) / (std2 + epsilon),
+        #                                       (eval_data_wav_3 - mean3) / (std3 + epsilon)]),
+        #                             0, 1)
+        # test_data_wav = np.moveaxis(np.array([(test_data_wav_1 - mean1) / (std1 + epsilon),
+        #                                       (test_data_wav_2 - mean2) / (std2 + epsilon),
+        #                                       (test_data_wav_3 - mean3) / (std3 + epsilon)]),
+        #                             0, 1)
+
+        max1 = np.max(train_data_wav_1)
+        min1 = np.min(train_data_wav_1)
+        max2 = np.max(train_data_wav_2)
+        min2 = np.min(train_data_wav_2)
+        max3 = np.max(train_data_wav_3)
+        min3 = np.min(train_data_wav_3)
+        train_data_wav = np.moveaxis(np.array([(train_data_wav_1 - min1) / (max1 - min1),
+                                               (train_data_wav_2 - min2) / (max2 - min2),
+                                               (train_data_wav_3 - min3) / (max3 - min3)]),
                                      0, 1)
-        eval_data_wav = np.moveaxis(np.array([(eval_data_wav_1 - mean1) / (std1 + epsilon),
-                                              (eval_data_wav_2 - mean2) / (std2 + epsilon),
-                                              (eval_data_wav_3 - mean3) / (std3 + epsilon)]),
+        eval_data_wav = np.moveaxis(np.array([(eval_data_wav_1 - min1) / (max1 - min1),
+                                              (eval_data_wav_2 - min2) / (max2 - min2),
+                                              (eval_data_wav_3 - min3) / (max3 - min3)]),
                                     0, 1)
-        test_data_wav = np.moveaxis(np.array([(test_data_wav_1 - mean1) / (std1 + epsilon),
-                                              (test_data_wav_2 - mean2) / (std2 + epsilon),
-                                              (test_data_wav_3 - mean3) / (std3 + epsilon)]),
+        test_data_wav = np.moveaxis(np.array([(test_data_wav_1 - min1) / (max1 - min1),
+                                              (test_data_wav_2 - min2) / (max2 - min2),
+                                              (test_data_wav_3 - min3) / (max3 - min3)]),
                                     0, 1)
 
         np.savez_compressed(train_data_wav_file, train_data_wav)
@@ -322,26 +365,41 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         np.savez_compressed(test_data_wav_file, test_data_wav)
         print('Successfully saved wave test data.')
 
-        np.savez_compressed(train_labels_file, train_labels)
-        print('Successfully saved train labels.')
-        np.savez_compressed(eval_labels_file, eval_labels)
-        print('Successfully saved eval labels.')
-        np.savez_compressed(test_labels_file, test_labels)
-        print('Successfully saved test labels.')
+        np.savez_compressed(train_labels_cat_file, train_labels_cat)
+        print('Successfully saved categorical train labels.')
+        np.savez_compressed(eval_labels_cat_file, eval_labels_cat)
+        print('Successfully saved categorical eval labels.')
+        np.savez_compressed(test_labels_cat_file, test_labels_cat)
+        print('Successfully saved categorical test labels.')
 
+        np.savez_compressed(train_labels_dim_file, train_labels_dim)
+        print('Successfully saved dimensional train labels.')
+        np.savez_compressed(eval_labels_dim_file, eval_labels_dim)
+        print('Successfully saved dimensional eval labels.')
+        np.savez_compressed(test_labels_dim_file, test_labels_dim)
+        print('Successfully saved dimensional test labels.')
+
+        # with open(stats_file, 'wb') as af:
+        #     pickle.dump((mean1, std1, mean2, std2, mean3, std3), af)
+        # means = np.array([mean1, mean2, mean3])
+        # stds = np.array([std1, std2, std3])
         with open(stats_file, 'wb') as af:
-            pickle.dump((mean1, std1, mean2, std2, mean3, std3), af)
-        means = np.array([mean1, mean2, mean3])
-        stds = np.array([std1, std2, std3])
+            pickle.dump((max1, min1, max2, min2, max3, min3), af)
+        means = np.array([max1, max2, max3])
+        stds = np.array([min1, min2, min3])
         print('Successfully saved stats.')
     else:
         train_data_wav = np.load(train_data_wav_file)['arr_0']
         eval_data_wav = np.load(eval_data_wav_file)['arr_0']
         test_data_wav = np.load(test_data_wav_file)['arr_0']
 
-        train_labels = np.load(train_labels_file)['arr_0']
-        eval_labels = np.load(eval_labels_file)['arr_0']
-        test_labels = np.load(test_labels_file)['arr_0']
+        train_labels_cat = np.load(train_labels_cat_file)['arr_0']
+        eval_labels_cat = np.load(eval_labels_cat_file)['arr_0']
+        test_labels_cat = np.load(test_labels_cat_file)['arr_0']
+
+        train_labels_dim = np.load(train_labels_dim_file)['arr_0']
+        eval_labels_dim = np.load(eval_labels_dim_file)['arr_0']
+        test_labels_dim = np.load(test_labels_dim_file)['arr_0']
 
         with open(stats_file, 'rb') as af:
             stats = pickle.load(af)
@@ -349,30 +407,32 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         stds = np.array(stats[4:])
 
     return train_data_wav, eval_data_wav, test_data_wav, \
-           train_labels, eval_labels, test_labels, \
-           means, stds
+        train_labels_cat, eval_labels_cat, test_labels_cat, \
+        train_labels_dim, eval_labels_dim, test_labels_dim, \
+        means, stds
 
 
 def load_ted_db_data(_path, dataset):
     partitions = ['train', 'val', 'test']
+    vid_names_done = [[]] * len(partitions)
 
     clip_duration_range = [5, 12]
 
     # load clips and make gestures
     n_saved = 0
-    for partition in partitions:
+    for part_idx, partition in enumerate(partitions):
         lmdb_env = lmdb.open(j(_path, dataset, 'lmdb_{}'.format(partition)), readonly=True, lock=False)
         save_dir_vid = j(_path, dataset, 'videos', partition)
         save_dir_wav = j(_path, dataset, 'waves', partition)
         os.makedirs(save_dir_vid, exist_ok=True)
         os.makedirs(save_dir_wav, exist_ok=True)
-        vid_names = []
         num_clips = []
         clip_start = []
         clip_end = []
         with lmdb_env.begin(write=False) as txn:
             keys = [key for key, _ in txn.cursor()]
             num_videos = len(keys)
+            vid_names_done[part_idx] = True * np.ones(num_videos, dtype=bool)
             for key_idx, key in enumerate(keys):
                 buf = txn.get(key)
                 video = pyarrow.deserialize(buf)
@@ -385,12 +445,15 @@ def load_ted_db_data(_path, dataset):
                     file_name = vid_name + '_' + str(clip_idx).zfill(3)
                     vid_file = j(save_dir_vid, file_name + '.mp4')
                     wav_file = j(save_dir_wav, file_name + '.wav')
-                    if not os.path.exists(vid_file):
+                    if vid_names_done[part_idx][key_idx] and not os.path.exists(vid_file):
                         cmd_vid = ('ffmpeg $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
                                    ' sed "s/.*/-ss {} -i &/") -t {} -c:v libx264 -c:a copy {}')\
                             .format(vid_name, clip['start_time'], clip['end_time'] - clip['start_time'], vid_file)
-                        os.system(cmd_vid)
-                    if not os.path.exists(wav_file):
+                        return_code = os.system(cmd_vid)
+                        if return_code != 0:
+                            vid_names_done[part_idx][key_idx] = False
+                    if vid_names_done[part_idx][key_idx] and\
+                            os.path.exists(vid_file) and not os.path.exists(wav_file):
                         cmd_wav = 'ffmpeg -i {} -ac 2 -f wav {}'.format(vid_file, wav_file)
                         os.system(cmd_wav)
                     print('\rPartition: {}. Video: {} of {} ({:.2f}%). Clip: {} of {} ({:.2f}%).'

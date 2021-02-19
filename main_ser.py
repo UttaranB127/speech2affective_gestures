@@ -37,7 +37,7 @@ parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
 parser.add_argument('--load-last-best', type=bool, default=True, metavar='LB',
                     help='load the most recent best model (default: True)')
-parser.add_argument('--batch-size', type=int, default=16, metavar='B',
+parser.add_argument('--batch-size', type=int, default=128, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
@@ -99,16 +99,17 @@ randomized = False
 args.work_dir_ser = os.path.join(models_ser_path, args.dataset_ser)
 os.makedirs(args.work_dir_ser, exist_ok=True)
 
-train_data_wav, eval_data_wav, test_data_wav,\
-    train_labels_dim, eval_labels_dim, test_labels_dim,\
-    means, stds = loader.load_ted_db_data(data_path, args.dataset_s2eg)
+# train_data_wav, eval_data_wav, test_data_wav,\
+#     train_labels_dim, eval_labels_dim, test_labels_dim,\
+#     means, stds = loader.load_ted_db_data(data_path, args.dataset_s2eg)
 
-# train_data_wav, eval_data_wav, test_data_wav, \
-#     train_labels_cat, eval_labels_cat, test_labels_cat, \
-#     train_labels_dim, eval_labels_dim, test_labels_dim, \
-#     means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
+train_data_wav, eval_data_wav, test_data_wav, \
+    train_labels_cat, eval_labels_cat, test_labels_cat, \
+    train_labels_dim, eval_labels_dim, test_labels_dim, \
+    means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
 
 _, wav_channels, wav_height, wav_width = train_data_wav.shape
+num_emo_cats = train_labels_cat.shape[-1]
 num_emo_dims = train_labels_dim.shape[-1]
 
 data_loader = dict(train_data=train_data_wav, train_labels_cat=train_labels_cat, train_labels_dim=train_labels_dim,
@@ -116,7 +117,8 @@ data_loader = dict(train_data=train_data_wav, train_labels_cat=train_labels_cat,
                    test_data=test_data_wav, test_labels_cat=test_labels_cat, test_labels_dim=test_labels_dim,)
 
 pr = processor.Processor(args, data_path, data_loader,
-                         wav_channels, wav_height, wav_width, num_emo_dims,
+                         wav_channels, wav_height, wav_width,
+                         num_emo_cats, num_emo_dims,
                          save_path=base_path)
 
 if args.train:

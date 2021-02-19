@@ -29,7 +29,7 @@ def find_all_substr(a_str, sub):
 def get_epoch_and_loss(path_to_model_files, epoch='best'):
     all_models = os.listdir(path_to_model_files)
     if len(all_models) < 2:
-        return '', None, np.inf
+        return '', None, 0., np.inf
     if epoch == 'best':
         loss_list = -1. * np.ones(len(all_models))
         for i, model in enumerate(all_models):
@@ -43,8 +43,9 @@ def get_epoch_and_loss(path_to_model_files, epoch='best'):
             best_model = all_models[loss_idx[1]]
         all_underscores = list(find_all_substr(best_model, '_'))
         # return model name, best loss
-        return best_model, int(best_model[all_underscores[0] + 1:all_underscores[1]]), \
-               float(best_model[all_underscores[2] + 1:all_underscores[3]])
+        return best_model, int(best_model[all_underscores[0] + 1:all_underscores[1]]),\
+            float(best_model[all_underscores[2] + 1:all_underscores[3]]), \
+            float(best_model[all_underscores[4] + 1:all_underscores[5]])
     assert isinstance(epoch, int)
     found_model = None
     for i, model in enumerate(all_models):
@@ -55,8 +56,9 @@ def get_epoch_and_loss(path_to_model_files, epoch='best'):
     if found_model is None:
         return '', None, np.inf
     all_underscores = list(find_all_substr(found_model, '_'))
-    return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]), \
-        float(found_model[all_underscores[2] + 1:all_underscores[3]])
+    return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]),\
+        float(found_model[all_underscores[2] + 1:all_underscores[3]]),\
+        float(found_model[all_underscores[4] + 1:all_underscores[5]])
 
 
 class Processor(object):
@@ -64,7 +66,7 @@ class Processor(object):
         Processor for emotive gesture generation
     """
 
-    def __init__(self, args, data_path, data_loader, C, H, W, D,
+    def __init__(self, args, data_path, data_loader, C, H, W, EC, ED,
                  min_train_epochs=20,
                  zfill=6,
                  save_path=None):
@@ -90,27 +92,29 @@ class Processor(object):
         self.C = C
         self.H = H
         self.W = W
-        self.D = D
+        self.EC = EC
+        self.ED = ED
 
         self.L1 = 128
         self.L2 = 256
         self.gru_cell_units = 128
-        self.attention_size = 1
-        self.num_linear = 768
+        self.attention_size = 5
+        self.num_linear = 128
         self.pool_stride_height = 2
         self.pool_stride_width = 4
         self.F1 = 64
-        self.bidirectional = True
+        self.bidirectional = False
         self.dropout_keep_prob = 1.
 
-        self.pred_loss_func = nn.SmoothL1Loss()
-        self.best_loss = np.inf
-        self.loss_updated = False
+        self.pred_loss_func = nn.CrossEntropyLoss()
+        self.best_accu = np.inf
+        self.accu_updated = False
         self.step_epochs = [math.ceil(float(self.args.num_epoch * x)) for x in self.args.step]
-        self.best_loss_epoch = None
+        self.best_accu_epoch = None
+        self.best_accu_loss = None
         self.min_train_epochs = min_train_epochs
         self.zfill = zfill
-        self.ser_model = AttConvRNN(C=self.C, H=self.H, W=self.W, D=self.D,
+        self.ser_model = AttConvRNN(C=self.C, H=self.H, W=self.W, EC=self.EC,
                                     L1=self.L1, L2=self.L2, gru_cell_units=self.gru_cell_units,
                                     attention_size=self.attention_size, num_linear=self.num_linear,
                                     pool_stride_height=self.pool_stride_height,
@@ -121,6 +125,7 @@ class Processor(object):
             self.args.batch_size *= torch.cuda.device_count()
             self.ser_model = nn.DataParallel(self.ser_model)
         self.ser_model.to(torch.cuda.current_device())
+        self.conv2_weights = []
         print('Total training data:\t\t{}'.format(len(self.data_loader['train_data'])))
         print('Total evaluation data:\t\t{}'.format(len(self.data_loader['eval_data'])))
         print('Total testing data:\t\t\t{}'.format(len(self.data_loader['test_data'])))
@@ -153,7 +158,7 @@ class Processor(object):
         return data, poses, quat, trans, affs
 
     def load_model_at_epoch(self, epoch='best'):
-        model_name, self.best_loss_epoch, self.best_loss = \
+        model_name, self.best_accu_epoch, self.best_accu, self.best_accu_loss = \
             get_epoch_and_loss(self.args.work_dir_ser, epoch=epoch)
         model_found = False
         try:
@@ -178,12 +183,12 @@ class Processor(object):
 
     def show_epoch_info(self):
 
-        print_epochs = [self.best_loss_epoch if self.best_loss_epoch is not None else 0]
-        best_metrics = [self.best_loss]
+        best_metrics = [self.best_accu, self.best_accu_loss]
+        print_epochs = [self.best_accu_epoch if self.best_accu_epoch is not None else 0] * len(best_metrics)
         i = 0
         for k, v in self.epoch_info.items():
-            self.io.print_log('\t{}: {}. Best so far: {} (epoch: {:d}).'.
-                              format(k, v, best_metrics[i], print_epochs[i]))
+            self.io.print_log('\t{}: {}. Best so far: {:.4f} (epoch: {:d}).'.
+                              format(k, v, best_metrics[i] * 100., print_epochs[i]))
             i += 1
         if self.args.pavi_log:
             self.io.log('train', self.meta_info['iter'], self.epoch_info)
@@ -208,14 +213,14 @@ class Processor(object):
 
     def yield_batch(self, train):
         batch_data = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).cuda()
-        batch_labels = torch.zeros((self.args.batch_size, self.D)).cuda()
+        batch_labels_cat = torch.zeros(self.args.batch_size).long().cuda()
 
         if train:
             data_np = self.data_loader['train_data']
-            labels_np = self.data_loader['train_labels']
+            labels_np = self.data_loader['train_labels_cat']
         else:
             data_np = self.data_loader['eval_data']
-            labels_np = self.data_loader['eval_labels']
+            labels_np = self.data_loader['eval_labels_cat']
 
         num_data = len(data_np)
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
@@ -225,13 +230,13 @@ class Processor(object):
             rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
             for i, k in enumerate(rand_keys):
                 batch_data[i] = torch.from_numpy(data_np[k])
-                batch_labels[i] = torch.from_numpy(labels_np[k])
+                batch_labels_cat[i] = torch.from_numpy(np.where(labels_np[k])[0])
 
-            yield batch_data, batch_labels
+            yield batch_data, batch_labels_cat
 
     def return_batch(self, batch_size, dataset, randomized=True):
         data_np = dataset['data']
-        labels_np = dataset['labels']
+        labels_np = dataset['labels_cat']
         if len(batch_size) > 1:
             rand_keys = np.copy(batch_size)
             batch_size = len(batch_size)
@@ -245,13 +250,13 @@ class Processor(object):
                 rand_keys = np.arange(batch_size)
 
         batch_data = torch.zeros((batch_size, self.C, self.H, self.W)).cuda()
-        batch_labels = torch.zeros((batch_size, self.D)).cuda()
+        batch_labels_cat = torch.zeros(batch_size).long().cuda()
 
         for i, k in enumerate(rand_keys):
             batch_data[i] = torch.from_numpy(data_np[k])
-            batch_labels[i] = torch.from_numpy(labels_np[k])
+            batch_labels_cat[i] = torch.from_numpy(np.where(labels_np[k])[0])
 
-        return batch_data, batch_labels
+        return batch_data, batch_labels_cat
 
     def forward_pass(self, data, labels_gt):
         self.optimizer.zero_grad()
@@ -259,33 +264,39 @@ class Processor(object):
             labels_pred = self.ser_model(data)
             # labels_pred_np = labels_pred.detach().cpu().numpy()
             # labels_gt_np = labels_gt.detach().cpu().numpy()
-            total_loss = 10. * self.pred_loss_func(labels_pred, labels_gt)
-        return total_loss
+            total_loss = self.pred_loss_func(labels_pred, labels_gt)
+        return total_loss, torch.argmax(labels_pred, dim=-1)
 
     def per_train(self):
 
         self.ser_model.train()
         batch_loss = 0.
+        batch_accu = 0.
         num_batches = 0.
 
-        for train_data_wav, train_labels in self.yield_batch(train=True):
-            train_loss = self.forward_pass(train_data_wav, train_labels)
+        for train_data_wav, train_labels_cat in self.yield_batch(train=True):
+            train_loss, train_labels_pred = self.forward_pass(train_data_wav, train_labels_cat)
             train_loss.backward()
             # nn.utils.clip_grad_norm_(self.ser_model.parameters(), self.args.gradient_clip)
             self.optimizer.step()
+            train_accu = torch.sum((train_labels_cat - train_labels_pred) == 0) / len(train_labels_pred)
 
             # Compute statistics
             batch_loss += train_loss.item()
+            batch_accu += train_accu.item()
             num_batches += 1
 
             # statistics
             self.iter_info['loss'] = train_loss.data.item()
+            self.iter_info['accu'] = train_accu.data.item()
             self.iter_info['lr'] = '{:.6f}'.format(self.lr)
             self.iter_info['tf'] = '{:.6f}'.format(self.tf)
             self.show_iter_info()
             self.meta_info['iter'] += 1
 
         batch_loss /= num_batches
+        batch_accu /= num_batches
+        self.epoch_info['mean_accu'] = batch_accu
         self.epoch_info['mean_loss'] = batch_loss
         self.show_epoch_info()
         self.io.print_timer()
@@ -297,22 +308,28 @@ class Processor(object):
         self.ser_model.eval()
         eval_loader = self.data_loader['eval_data']
         batch_loss = 0.
+        batch_accu = 0.
         num_batches = 0.
 
-        for eval_data_wav, eval_labels in self.yield_batch(train=False):
+        for eval_data_wav, eval_labels_cat in self.yield_batch(train=False):
             with torch.no_grad():
-                eval_loss = self.forward_pass(eval_data_wav, eval_labels)
+                eval_loss, eval_labels_pred = self.forward_pass(eval_data_wav, eval_labels_cat)
+                eval_accu = torch.sum((eval_labels_cat - eval_labels_pred) == 0) / len(eval_labels_pred)
                 batch_loss += eval_loss.item()
+                batch_accu += eval_accu.item()
                 num_batches += 1
 
         batch_loss /= num_batches
+        batch_accu /= num_batches
+        self.epoch_info['mean_accu'] = batch_accu
         self.epoch_info['mean_loss'] = batch_loss
-        if self.epoch_info['mean_loss'] < self.best_loss and self.meta_info['epoch'] > self.min_train_epochs:
-            self.best_loss = self.epoch_info['mean_loss']
-            self.best_loss_epoch = self.meta_info['epoch']
-            self.loss_updated = True
+        if self.epoch_info['mean_accu'] > self.best_accu and self.meta_info['epoch'] > self.min_train_epochs:
+            self.best_accu = self.epoch_info['mean_accu']
+            self.best_accu_epoch = self.meta_info['epoch']
+            self.best_accu_loss = self.meta_info['loss']
+            self.accu_updated = True
         else:
-            self.loss_updated = False
+            self.accu_updated = False
         self.show_epoch_info()
 
     def train(self):
@@ -322,7 +339,7 @@ class Processor(object):
             if not model_found and self.args.start_epoch is not 'best':
                 print('Warning! Trying to load best known model: '.format(self.args.start_epoch), end='')
                 model_found = self.load_model_at_epoch(epoch='best')
-                self.args.start_epoch = self.best_loss_epoch if model_found else 0
+                self.args.start_epoch = self.best_accu_epoch if model_found else 0
                 print('loaded.')
                 if not model_found:
                     print('Warning! Starting at epoch 0')
@@ -345,10 +362,10 @@ class Processor(object):
                 self.io.print_log('Done.')
 
             # save model and weights
-            if self.loss_updated or epoch % self.args.save_interval == 0:
+            if self.accu_updated or epoch % self.args.save_interval == 0:
                 torch.save({'model_dict': self.ser_model.state_dict()},
-                           os.path.join(self.args.work_dir_ser, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
-                                        format(epoch, self.epoch_info['mean_loss'])))
+                           os.path.join(self.args.work_dir_ser, 'epoch_{}_accu_{:.4f}_loss_{:.4f}_model.pth.tar'.
+                                        format(epoch, self.epoch_info['mean_accu'], self.epoch_info['mean_loss'])))
 
     def copy_prefix(self, var, prefix_length=None):
         if prefix_length is None:
@@ -396,7 +413,7 @@ class Processor(object):
             quat_pred_np = quat_pred.detach().cpu().numpy()
             root_pos = torch.zeros(quat_pred.shape[0], quat_pred.shape[1], self.C).cuda()
             pos_pred = MocapDataset.forward_kinematics(quat_pred.contiguous().view(
-                quat_pred.shape[0], quat_pred.shape[1], -1, self.D), root_pos, self.joint_parents,
+                quat_pred.shape[0], quat_pred.shape[1], -1, self.EC), root_pos, self.joint_parents,
                 torch.cat((root_pos[:, 0:1], joint_offsets), dim=1).unsqueeze(1))
 
         animation_pred = {
@@ -432,5 +449,5 @@ class Processor(object):
             detach().cpu().numpy()
         display_animations(pos_pred_np, self.joint_parents, save=True,
                            dataset_name=self.dataset,
-                           subset_name='epoch_' + str(self.best_loss_epoch),
+                           subset_name='epoch_' + str(self.best_accu_epoch),
                            overwrite=True)

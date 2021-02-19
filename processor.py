@@ -54,7 +54,7 @@ def get_epoch_and_loss(path_to_model_files, epoch='best'):
             found_model = model
             break
     if found_model is None:
-        return '', None, np.inf
+        return '', None, 0., np.inf
     all_underscores = list(find_all_substr(found_model, '_'))
     return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]),\
         float(found_model[all_underscores[2] + 1:all_underscores[3]]),\

@@ -41,7 +41,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--start-epoch', type=int, default=20, metavar='SE',
+parser.add_argument('--start-epoch', type=int, default=688, metavar='SE',
                     help='starting epoch of training (default: 0)')
 parser.add_argument('--num-epoch', type=int, default=5000, metavar='NE',
                     help='number of epochs to train (default: 1000)')
@@ -96,9 +96,6 @@ parser.add_argument('--save-log', action='store_true', default=True,
 args = parser.parse_args()
 randomized = False
 
-args.work_dir_ser = os.path.join(models_ser_path, args.dataset_ser)
-os.makedirs(args.work_dir_ser, exist_ok=True)
-
 # train_data_wav, eval_data_wav, test_data_wav,\
 #     train_labels_dim, eval_labels_dim, test_labels_dim,\
 #     means, stds = loader.load_ted_db_data(data_path, args.dataset_s2eg)
@@ -111,6 +108,9 @@ train_data_wav, eval_data_wav, test_data_wav, \
 _, wav_channels, wav_height, wav_width = train_data_wav.shape
 num_emo_cats = train_labels_cat.shape[-1]
 num_emo_dims = train_labels_dim.shape[-1]
+
+args.work_dir_ser = os.path.join(models_ser_path, args.dataset_ser + '_{:02d}_cats'.format(num_emo_cats))
+os.makedirs(args.work_dir_ser, exist_ok=True)
 
 data_loader = dict(train_data=train_data_wav, train_labels_cat=train_labels_cat, train_labels_dim=train_labels_dim,
                    eval_data=eval_data_wav, eval_labels_cat=eval_labels_cat, eval_labels_dim=eval_labels_dim,

@@ -17,7 +17,8 @@ from os.path import join as j
 from scipy.io import wavfile
 from tqdm import tqdm
 
-emotions_names_cat = ['neu', 'hap', 'exc', 'sur', 'fea', 'sad', 'dis', 'ang', 'fru', 'oth']
+emotions_names_10_cats = ['neu', 'hap', 'exc', 'sur', 'fea', 'sad', 'dis', 'ang', 'fru', 'oth']
+emotions_names_07_cats = ['neu', 'hap', 'fea', 'sad', 'dis', 'ang', 'oth']
 nrc_vad_lexicon_file = '../../data/NRC-VAD-Lexicon-Aug2018Release/NRC-VAD-Lexicon.txt'
 nrc_vad_lexicon = {}
 
@@ -135,11 +136,23 @@ def load_data():
     return mean1, std1, mean2, std2, mean3, std3
 
 
-def extract_categorical_emotions(string):
+def extract_07_categorical_emotions(string):
+    if string == 'exc' or string == 'sur':
+        string = 'hap'
+    if string == 'fru':
+        string = 'ang'
     if string == 'xxx':
         string = 'oth'
-    emotions_cat = np.zeros(len(emotions_names_cat), dtype=int)
-    emotions_cat[emotions_names_cat.index(string)] = 1
+    emotions_cat = np.zeros(len(emotions_names_07_cats), dtype=int)
+    emotions_cat[emotions_names_07_cats.index(string)] = 1
+    return emotions_cat
+
+
+def extract_10_categorical_emotions(string):
+    if string == 'xxx':
+        string = 'oth'
+    emotions_cat = np.zeros(len(emotions_names_10_cats), dtype=int)
+    emotions_cat[emotions_names_10_cats.index(string)] = 1
     return emotions_cat
 
 
@@ -166,7 +179,7 @@ def append_idx(idx_list, data_count, time, block_size):
 def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.,
                       block_size=300, filter_num=40, epsilon=1e-5):
     dataset_dir = j(data_dir, dataset)
-    processed_dir = j(dataset_dir, 'processed_new')
+    processed_dir = j(dataset_dir, 'processed_07_cats')
     os.makedirs(processed_dir, exist_ok=True)
     train_data_wav_file = j(processed_dir, 'train_data_wav.npz')
     eval_data_wav_file = j(processed_dir, 'eval_data_wav.npz')
@@ -221,7 +234,7 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
                     ef_lines = ef.readlines()
                     for ef_line in ef_lines:
                         if ef_line[0] == '[':
-                            emotions_cat.append(extract_categorical_emotions(ef_line.split()[4]))
+                            emotions_cat.append(extract_07_categorical_emotions(ef_line.split()[4]))
                             emotions_dim.append([float(x) for x in re.findall('\d+\.\d+', ef_line)[-3:]])
 
                         # extract_dimensional_emotions(ef_line)

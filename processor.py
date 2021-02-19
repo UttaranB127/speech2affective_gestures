@@ -325,8 +325,8 @@ class Processor(object):
         self.epoch_info['mean_loss'] = batch_loss
         if self.epoch_info['mean_accu'] > self.best_accu and self.meta_info['epoch'] > self.min_train_epochs:
             self.best_accu = self.epoch_info['mean_accu']
+            self.best_accu_loss = self.epoch_info['mean_loss']
             self.best_accu_epoch = self.meta_info['epoch']
-            self.best_accu_loss = self.meta_info['loss']
             self.accu_updated = True
         else:
             self.accu_updated = False

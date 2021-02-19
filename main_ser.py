@@ -41,7 +41,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--start-epoch', type=int, default=0, metavar='SE',
+parser.add_argument('--start-epoch', type=int, default=20, metavar='SE',
                     help='starting epoch of training (default: 0)')
 parser.add_argument('--num-epoch', type=int, default=5000, metavar='NE',
                     help='number of epochs to train (default: 1000)')

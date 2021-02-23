@@ -50,20 +50,28 @@ parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
 parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
                     help='perform data augmentation by mirroring all the sequences (default: False)')
-parser.add_argument('--train', type=bool, default=True, metavar='T',
-                    help='train the model (default: True)')
+parser.add_argument('--train-ser', type=bool, default=False, metavar='T-SER',
+                    help='train the ser model (default: True)')
+parser.add_argument('--train-s2eg', type=bool, default=True, metavar='T-S2EG',
+                    help='train the s2eg model (default: True)')
 parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
-parser.add_argument('--load-last-best', type=bool, default=True, metavar='LB',
-                    help='load the most recent best model (default: True)')
+parser.add_argument('--ser-load-last-best', type=bool, default=True, metavar='SER-LB',
+                    help='load the most recent best model for ser (default: True)')
+parser.add_argument('--s2eg-load-last-best', type=bool, default=True, metavar='S2EG-LB',
+                    help='load the most recent best model for s2eg (default: True)')
 parser.add_argument('--batch-size', type=int, default=16, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--start-epoch', type=int, default=0, metavar='SE',
-                    help='starting epoch of training (default: 0)')
-parser.add_argument('--num-epoch', type=int, default=5000, metavar='NE',
-                    help='number of epochs to train (default: 1000)')
+parser.add_argument('--ser-start-epoch', type=int, default=4135, metavar='SER-SE',
+                    help='starting epoch of training of ser (default: 0)')
+parser.add_argument('--ser-num-epoch', type=int, default=5000, metavar='SER-NE',
+                    help='number of epochs to train ser (default: 1000)')
+parser.add_argument('--s2eg-start-epoch', type=int, default=0, metavar='S2EG-SE',
+                    help='starting epoch of training of s2eg (default: 0)')
+parser.add_argument('--s2eg-num-epoch', type=int, default=5000, metavar='S2EG-NE',
+                    help='number of epochs to train s2eg (default: 1000)')
 # parser.add_argument('--window-length', type=int, default=1, metavar='WL',
 #                     help='max number of past time steps to take as input to transformer decoder (default: 60)')
 parser.add_argument('--ser-optimizer', type=str, default='Adam', metavar='SER-O',
@@ -76,8 +84,6 @@ parser.add_argument('--step', type=list, default=0.05 * np.arange(20), metavar='
                     help='fraction of steps when learning rate will be decreased (default: [0.5, 0.75, 0.875])')
 parser.add_argument('--lr-decay', type=float, default=0.9999, metavar='LRD',
                     help='learning rate decay (default: 0.999)')
-parser.add_argument('--tf-decay', type=float, default=0.995, metavar='TFD',
-                    help='teacher forcing ratio decay (default: 0.995)')
 parser.add_argument('--gradient-clip', type=float, default=0.1, metavar='GC',
                     help='gradient clip threshold (default: 0.1)')
 parser.add_argument('--nesterov', action='store_true', default=True,
@@ -135,6 +141,7 @@ num_emo_dims = train_labels_dim.shape[-1]
 args.work_dir_ser = j(models_ser_path, args.dataset_ser + '_{:02d}_cats'.format(num_emo_cats))
 args.work_dir_s2eg = j(models_s2eg_path, args.dataset_s2eg)
 os.makedirs(args.work_dir_ser, exist_ok=True)
+os.makedirs(args.work_dir_s2eg, exist_ok=True)
 
 data_loader = dict(train_data_ser=train_data_wav, train_data_s2eg=train_data_ted,
                    train_labels_cat=train_labels_cat, train_labels_dim=train_labels_dim,
@@ -148,7 +155,6 @@ pr = processor.Processor(args, config_args, data_path, data_loader,
                          num_emo_cats, num_emo_dims, pose_dim,
                          save_path=base_path)
 
-if args.train:
-    pr.train()
+pr.train()
 
 pr.generate_motion(samples_to_generate=len(data_loader['test']), randomized=randomized)

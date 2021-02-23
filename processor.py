@@ -33,10 +33,13 @@ def find_all_substr(a_str, sub):
         start += len(sub)  # use start += 1 to find overlapping matches
 
 
-def get_epoch_and_loss(path_to_model_files, epoch='best'):
+def get_epoch_and_loss(path_to_model_files, phase, epoch='best'):
     all_models = os.listdir(path_to_model_files)
     if len(all_models) < 2:
-        return '', None, 0., np.inf
+        if phase == 'ser':
+            return '', None, 0., np.inf
+        if phase == 's2eg':
+            return '', None, np.inf
     if epoch == 'best':
         loss_list = -1. * np.ones(len(all_models))
         for i, model in enumerate(all_models):
@@ -50,9 +53,13 @@ def get_epoch_and_loss(path_to_model_files, epoch='best'):
             best_model = all_models[loss_idx[1]]
         all_underscores = list(find_all_substr(best_model, '_'))
         # return model name, best loss
-        return best_model, int(best_model[all_underscores[0] + 1:all_underscores[1]]),\
-            float(best_model[all_underscores[2] + 1:all_underscores[3]]), \
-            float(best_model[all_underscores[4] + 1:all_underscores[5]])
+        if phase == 'ser':
+            return best_model, int(best_model[all_underscores[0] + 1:all_underscores[1]]),\
+                float(best_model[all_underscores[2] + 1:all_underscores[3]]), \
+                float(best_model[all_underscores[4] + 1:all_underscores[5]])
+        if phase == 's2eg':
+            return best_model, int(best_model[all_underscores[0] + 1:all_underscores[1]]), \
+                   float(best_model[all_underscores[2] + 1:all_underscores[3]])
     assert isinstance(epoch, int)
     found_model = None
     for i, model in enumerate(all_models):
@@ -61,11 +68,18 @@ def get_epoch_and_loss(path_to_model_files, epoch='best'):
             found_model = model
             break
     if found_model is None:
-        return '', None, 0., np.inf
+        if phase == 'ser':
+            return '', None, 0., np.inf
+        if phase == 'se2g':
+            return '', None, np.inf
     all_underscores = list(find_all_substr(found_model, '_'))
-    return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]),\
-        float(found_model[all_underscores[2] + 1:all_underscores[3]]),\
-        float(found_model[all_underscores[4] + 1:all_underscores[5]])
+    if phase == 'ser':
+        return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]),\
+            float(found_model[all_underscores[2] + 1:all_underscores[3]]),\
+            float(found_model[all_underscores[4] + 1:all_underscores[5]])
+    if phase == 's2eg':
+        return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]),\
+            float(found_model[all_underscores[2] + 1:all_underscores[3]])
 
 
 class Processor(object):
@@ -117,11 +131,14 @@ class Processor(object):
         self.dropout_keep_prob = 1.
 
         self.pred_loss_func = nn.CrossEntropyLoss()
-        self.best_accu = np.inf
-        self.accu_updated = False
-        self.step_epochs = [math.ceil(float(self.args.num_epoch * x)) for x in self.args.step]
-        self.best_accu_epoch = None
-        self.best_accu_loss = None
+        self.best_ser_accu = 0.
+        self.ser_accu_updated = False
+        self.ser_step_epochs = [math.ceil(float(self.args.ser_num_epoch * x)) for x in self.args.step]
+        self.best_ser_accu_epoch = None
+        self.best_ser_accu_loss = None
+        self.best_s2eg_loss = np.inf
+        self.best_s2eg_loss_epoch = None
+        self.s2eg_loss_updated = False
         self.min_train_epochs = min_train_epochs
         self.zfill = zfill
         self.ser_model = AttConvRNN(C=self.C, H=self.H, W=self.W, EC=self.EC,
@@ -171,7 +188,6 @@ class Processor(object):
         else:
             raise ValueError()
         self.lr = self.args.base_lr
-        self.tf = self.args.base_tr
 
         # s2eg optimizers
         self.s2eg_gen_optimizer = optim.Adam(self.s2eg_generator.parameters(),
@@ -189,13 +205,25 @@ class Processor(object):
         affs = affs.float().cuda()
         return data, poses, quat, trans, affs
 
-    def load_model_at_epoch(self, epoch='best'):
-        model_name, self.best_accu_epoch, self.best_accu, self.best_accu_loss = \
-            get_epoch_and_loss(self.args.work_dir_ser, epoch=epoch)
+    def load_model_at_epoch(self, phase, epoch='best'):
+        work_dir = self.args.work_dir_ser if phase == 'ser'\
+            else (self.args.work_dir_s2eg if phase == 's2eg' else None)
+        model_name = None
+        if phase == 'ser':
+            model_name, self.best_ser_accu_epoch, \
+                self.best_ser_accu, self.best_ser_accu_loss = get_epoch_and_loss(work_dir,
+                                                                                 'ser', epoch=epoch)
+        elif phase == 's2eg':
+            model_name, self.best_s2eg_loss_epoch, self.best_s2eg_loss = get_epoch_and_loss(work_dir,
+                                                                                            's2eg', epoch=epoch)
         model_found = False
         try:
-            loaded_vars = torch.load(j(self.args.work_dir_ser, model_name))
-            self.ser_model.load_state_dict(loaded_vars['model_dict'])
+            loaded_vars = torch.load(j(work_dir, model_name))
+            if phase == 'ser':
+                self.ser_model.load_state_dict(loaded_vars['ser_model_dict'])
+            elif phase == 's2eg':
+                self.s2eg_generator.load_state_dict(loaded_vars['gen_model_dict'])
+                self.s2eg_discriminator.load_state_dict(loaded_vars['dis_model_dict'])
             model_found = True
         except (FileNotFoundError, IsADirectoryError):
             if epoch == 'best':
@@ -204,19 +232,23 @@ class Processor(object):
                 print('Warning! No saved model found at epoch {:d}.'.format(epoch))
         return model_found
 
-    def adjust_lr(self):
+    def adjust_lr_ser(self):
         self.lr = self.lr * self.args.lr_decay
         for param_group in self.ser_optimizer.param_groups:
             param_group['lr'] = self.lr
 
-    def adjust_tf(self):
-        if self.meta_info['epoch'] > 20:
-            self.tf = self.tf * self.args.tf_decay
-
     def show_epoch_info(self):
 
-        best_metrics = [self.best_accu, self.best_accu_loss]
-        print_epochs = [self.best_accu_epoch if self.best_accu_epoch is not None else 0] * len(best_metrics)
+        best_metrics = []
+        print_epochs = []
+        if self.args.train_ser:
+            best_metrics = [self.best_ser_accu, self.best_ser_accu_loss]
+            print_epochs = [self.best_ser_accu_epoch
+                            if self.best_ser_accu_epoch is not None else 0] * len(best_metrics)
+        if self.args.train_s2eg:
+            best_metrics = [self.best_s2eg_loss]
+            print_epochs = [self.best_s2eg_loss_epoch
+                            if self.best_s2eg_loss_epoch is not None else 0] * len(best_metrics)
         i = 0
         for k, v in self.epoch_info.items():
             self.io.print_log('\t{}: {}. Best so far: {:.4f} (epoch: {:d}).'.
@@ -389,7 +421,7 @@ class Processor(object):
         noise = torch.randn_like(data) * 0.1
         return data + noise
 
-    def forward_pass_s2eg(self, in_text, in_audio, target_poses, vid_indices):
+    def forward_pass_s2eg(self, in_text, in_audio, target_poses, vid_indices, train):
         warm_up_epochs = self.config_args.loss_warmup
         use_noisy_target = False
 
@@ -417,8 +449,9 @@ class Processor(object):
                 dis_fake = self.s2eg_discriminator(out_dir_vec.detach(), in_text)
 
             dis_error = torch.sum(-torch.mean(torch.log(dis_real + 1e-8) + torch.log(1 - dis_fake + 1e-8)))  # ns-gan
-            dis_error.backward()
-            self.s2eg_dis_optimizer.step()
+            if train:
+                dis_error.backward()
+                self.s2eg_dis_optimizer.step()
 
         ###########################################################################################
         # train G
@@ -471,8 +504,9 @@ class Processor(object):
         if self.meta_info['epoch'] > warm_up_epochs:
             loss += self.config_args.loss_gan_weight * gen_error
 
-        loss.backward()
-        self.s2eg_gen_optimizer.step()
+        if train:
+            loss.backward()
+            self.s2eg_gen_optimizer.step()
 
         ret_dict = {'loss': self.config_args.loss_regression_weight * huber_loss.item()}
         if kld:
@@ -490,112 +524,206 @@ class Processor(object):
 
     def per_train(self):
 
-        self.ser_model.train()
-        batch_loss = 0.
-        batch_accu = 0.
+        batch_ser_loss = 0.
+        batch_ser_accu = 0.
+        batch_s2eg_loss = 0.
         num_batches = 0.
 
         for train_data_wav, train_labels_cat,\
                 word_seq_tensor, word_seq_lengths, extended_word_seq,\
                 pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=True):
-            ser_loss, train_labels_pred = self.forward_pass_ser(train_data_wav, train_labels_cat)
-            ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, vec_seq, vid_indices)
-            total_train_loss = ser_loss + ret_dict['total_loss']
-            total_train_loss.backward()
-            # nn.utils.clip_grad_norm_(self.ser_model.parameters(), self.args.gradient_clip)
-            self.ser_optimizer.step()
-            train_accu = torch.sum((train_labels_cat - train_labels_pred) == 0) / len(train_labels_pred)
+            if self.args.train_ser:
+                self.ser_model.train()
+                ser_loss, train_labels_pred = self.forward_pass_ser(train_data_wav, train_labels_cat)
+                ser_loss.backward()
+                # nn.utils.clip_grad_norm_(self.ser_model.parameters(), self.args.gradient_clip)
+                self.ser_optimizer.step()
+                train_accu = torch.sum((train_labels_cat - train_labels_pred) == 0) / len(train_labels_pred)
 
-            # Compute statistics
-            batch_loss += total_train_loss.item()
-            batch_accu += train_accu.item()
+                # Compute statistics
+                batch_ser_loss += ser_loss.item()
+                batch_ser_accu += train_accu.item()
+
+                self.iter_info['ser_loss'] = ser_loss.data.item()
+                self.iter_info['ser_accu'] = train_accu.data.item()
+                self.iter_info['lr_ser'] = '{:.6f}'.format(self.lr)
+                self.show_iter_info()
+            else:
+                self.ser_model.eval()
+                with torch.no_grad():
+                    ser_loss, train_labels_pred = self.forward_pass_ser(train_data_wav, train_labels_cat)
+
+            if self.args.train_s2eg:
+                self.s2eg_generator.train()
+                self.s2eg_discriminator.train()
+                ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, vec_seq, vid_indices, train=True)
+                # Compute statistics
+                batch_s2eg_loss += ret_dict['total_loss']
+
+                self.iter_info['s2eg_loss'] = ret_dict['total_loss']
+                self.iter_info['lr_gen'] = '{:.6f}'.format(self.config_args.learning_rate)
+                self.iter_info['lr_dis'] = '{:.6f}'.format(self.config_args.learning_rate *
+                                                           self.config_args.discriminator_lr_weight)
+                self.show_iter_info()
+
+            self.meta_info['iter'] += 1
             num_batches += 1
 
-            # statistics
-            self.iter_info['loss'] = total_train_loss.data.item()
-            self.iter_info['accu'] = train_accu.data.item()
-            self.iter_info['lr'] = '{:.6f}'.format(self.lr)
-            self.iter_info['tf'] = '{:.6f}'.format(self.tf)
-            self.show_iter_info()
-            self.meta_info['iter'] += 1
+        if self.args.train_ser:
+            batch_ser_loss /= num_batches
+            batch_ser_accu /= num_batches
+            self.epoch_info['mean_ser_accu'] = batch_ser_accu
+            self.epoch_info['mean_ser_loss'] = batch_ser_loss
 
-        batch_loss /= num_batches
-        batch_accu /= num_batches
-        self.epoch_info['mean_accu'] = batch_accu
-        self.epoch_info['mean_loss'] = batch_loss
+        if self.args.train_s2eg:
+            batch_s2eg_loss /= num_batches
+            self.epoch_info['mean_s2eg_loss'] = batch_s2eg_loss
+
         self.show_epoch_info()
         self.io.print_timer()
-        self.adjust_lr()
-        self.adjust_tf()
+        self.adjust_lr_ser()
 
     def per_eval(self):
 
-        self.ser_model.eval()
-        batch_loss = 0.
-        batch_accu = 0.
+        batch_ser_loss = 0.
+        batch_ser_accu = 0.
+        batch_s2eg_loss = 0.
         num_batches = 0.
 
-        for eval_data_wav, eval_labels_cat,\
-                word_seq_tensor, word_seq_lengths, extended_word_seq,\
+        for eval_data_wav, eval_labels_cat, \
+            word_seq_tensor, word_seq_lengths, extended_word_seq, \
                 pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=False):
+            self.ser_model.eval()
             with torch.no_grad():
                 ser_loss, eval_labels_pred = self.forward_pass_ser(eval_data_wav, eval_labels_cat)
-                ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, vec_seq, vid_indices)
-                total_eval_loss = ser_loss + ret_dict['total_loss']
                 eval_accu = torch.sum((eval_labels_cat - eval_labels_pred) == 0) / len(eval_labels_pred)
-                batch_loss += total_eval_loss.item()
-                batch_accu += eval_accu.item()
-                num_batches += 1
 
-        batch_loss /= num_batches
-        batch_accu /= num_batches
-        self.epoch_info['mean_accu'] = batch_accu
-        self.epoch_info['mean_loss'] = batch_loss
-        if self.epoch_info['mean_accu'] > self.best_accu and self.meta_info['epoch'] > self.min_train_epochs:
-            self.best_accu = self.epoch_info['mean_accu']
-            self.best_accu_loss = self.epoch_info['mean_loss']
-            self.best_accu_epoch = self.meta_info['epoch']
-            self.accu_updated = True
-        else:
-            self.accu_updated = False
+                if self.args.train_ser:
+                    # Compute statistics
+                    batch_ser_loss += ser_loss.item()
+                    batch_ser_accu += eval_accu.item()
+
+                    self.iter_info['ser_loss'] = ser_loss.data.item()
+                    self.iter_info['ser_accu'] = eval_accu.data.item()
+                    self.iter_info['lr_ser'] = '{:.6f}'.format(self.lr)
+                    self.show_iter_info()
+
+            if self.args.train_s2eg:
+                self.s2eg_generator.eval()
+                self.s2eg_discriminator.eval()
+                with torch.no_grad():
+                    ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, vec_seq, vid_indices, train=False)
+                    # Compute statistics
+                    batch_s2eg_loss += ret_dict['total_loss']
+
+                    self.iter_info['s2eg_loss'] = ret_dict['total_loss']
+                    self.iter_info['lr_gen'] = '{:.6f}'.format(self.lr)
+                    self.iter_info['lr_dis'] = '{:.6f}'.format(self.lr)
+                    self.show_iter_info()
+
+            self.meta_info['iter'] += 1
+            num_batches += 1
+
+        if self.args.train_ser:
+            batch_ser_loss /= num_batches
+            batch_ser_accu /= num_batches
+            self.epoch_info['mean_ser_accu'] = batch_ser_accu
+            self.epoch_info['mean_ser_loss'] = batch_ser_loss
+            if self.epoch_info['mean_ser_accu'] > self.best_ser_accu and \
+                    self.meta_info['epoch'] > self.min_train_epochs:
+                self.best_ser_accu = self.epoch_info['mean_ser_accu']
+                self.best_ser_accu_loss = self.epoch_info['mean_ser_loss']
+                self.best_ser_accu_epoch = self.meta_info['epoch']
+                self.ser_accu_updated = True
+            else:
+                self.ser_accu_updated = False
+
+        if self.args.train_s2eg:
+            batch_s2eg_loss /= num_batches
+            self.epoch_info['mean_s2eg_loss'] = batch_s2eg_loss
+            if self.epoch_info['mean_s2eg_loss'] < self.best_s2eg_loss and \
+                    self.meta_info['epoch'] > self.min_train_epochs:
+                self.best_s2eg_loss = self.epoch_info['mean_s2eg_loss']
+                self.best_s2eg_loss_epoch = self.meta_info['epoch']
+                self.s2eg_loss_updated = True
+            else:
+                self.s2eg_loss_updated = False
+
         self.show_epoch_info()
+        self.io.print_timer()
 
     def train(self):
 
-        if self.args.load_last_best:
-            model_found = self.load_model_at_epoch(epoch=self.args.start_epoch)
-            if not model_found and self.args.start_epoch is not 'best':
-                print('Warning! Trying to load best known model: '.format(self.args.start_epoch), end='')
-                model_found = self.load_model_at_epoch(epoch='best')
-                self.args.start_epoch = self.best_accu_epoch if model_found else 0
+        if self.args.ser_load_last_best:
+            ser_model_found = self.load_model_at_epoch('ser', epoch=self.args.ser_start_epoch)
+            if not ser_model_found and self.args.ser_start_epoch is not 'best':
+                print('Warning! Trying to load best known model for ser: '.format(self.args.ser_start_epoch),
+                      end='')
+                ser_model_found = self.load_model_at_epoch('ser', epoch='best')
+                self.args.ser_start_epoch = self.best_ser_accu_epoch if ser_model_found else 0
                 print('loaded.')
-                if not model_found:
+                if not ser_model_found:
                     print('Warning! Starting at epoch 0')
-                    self.args.start_epoch = 0
+                    self.args.ser_start_epoch = 0
         else:
-            self.args.start_epoch = 0
-        for epoch in range(self.args.start_epoch, self.args.num_epoch):
-            self.meta_info['epoch'] = epoch
+            self.args.ser_start_epoch = 0
+        if self.args.train_ser:
+            for epoch in range(self.args.ser_start_epoch, self.args.ser_num_epoch):
+                self.meta_info['epoch'] = epoch
 
-            # training
-            self.io.print_log('Training epoch: {}'.format(epoch))
-            self.per_train()
-            self.io.print_log('Done.')
-
-            # evaluation
-            if (epoch % self.args.eval_interval == 0) or (
-                    epoch + 1 == self.args.num_epoch):
-                self.io.print_log('Eval epoch: {}'.format(epoch))
-                self.per_eval()
+                # training
+                self.io.print_log('SER training epoch: {}'.format(epoch))
+                self.per_train()
                 self.io.print_log('Done.')
 
-            # save model and weights
-            if self.accu_updated or epoch % self.args.save_interval == 0:
-                torch.save({'ser_model_dict': self.ser_model.state_dict(),
-                            'gen_model_dict': self.s2eg_generator.state_dict(),
-                            'dis_model_dict': self.s2eg_discriminator.state_dict()},
-                           j(self.args.work_dir_s2eg, 'epoch_{}_accu_{:.4f}_loss_{:.4f}_model.pth.tar'.
-                             format(epoch, self.epoch_info['mean_accu'], self.epoch_info['mean_loss'])))
+                # evaluation
+                if (epoch % self.args.eval_interval == 0) or (
+                        epoch + 1 == self.args.num_epoch):
+                    self.io.print_log('SER eval epoch: {}'.format(epoch))
+                    self.per_eval()
+                    self.io.print_log('Done.')
+
+                # save model and weights
+                if self.ser_accu_updated or epoch % self.args.save_interval == 0:
+                    torch.save({'ser_model_dict': self.ser_model.state_dict()},
+                               j(self.args.work_dir_ser, 'epoch_{}_accu_{:.4f}_loss_{:.4f}_model.pth.tar'.
+                                 format(epoch, self.epoch_info['mean_ser_accu'], self.epoch_info['mean_ser_loss'])))
+
+        if self.args.train_s2eg:
+            if self.args.s2eg_load_last_best:
+                s2eg_model_found = self.load_model_at_epoch('s2eg', epoch=self.args.s2eg_start_epoch)
+                if not s2eg_model_found and self.args.s2eg_start_epoch is not 'best':
+                    print('Warning! Trying to load best known model for s2eg: '.format(self.args.s2eg_start_epoch),
+                          end='')
+                    s2eg_model_found = self.load_model_at_epoch('s2eg', epoch='best')
+                    self.args.s2eg_start_epoch = self.best_s2eg_loss_epoch if s2eg_model_found else 0
+                    print('loaded.')
+                    if not s2eg_model_found:
+                        print('Warning! Starting at epoch 0')
+                        self.args.s2eg_start_epoch = 0
+            else:
+                self.args.s2eg_start_epoch = 0
+            for epoch in range(self.args.s2eg_start_epoch, self.args.s2eg_num_epoch):
+                self.meta_info['epoch'] = epoch
+
+                # training
+                self.io.print_log('S2EG training epoch: {}'.format(epoch))
+                self.per_train()
+                self.io.print_log('Done.')
+
+                # evaluation
+                if (epoch % self.args.eval_interval == 0) or (
+                        epoch + 1 == self.args.num_epoch):
+                    self.io.print_log('S2EG eval epoch: {}'.format(epoch))
+                    self.per_eval()
+                    self.io.print_log('Done.')
+
+                # save model and weights
+                if self.s2eg_loss_updated or epoch % self.args.save_interval == 0:
+                    torch.save({'gen_model_dict': self.s2eg_generator.state_dict(),
+                                'dis_model_dict': self.s2eg_discriminator.state_dict()},
+                               j(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
+                                 format(epoch, self.epoch_info['mean_s2eg_loss'])))
 
     def copy_prefix(self, var, prefix_length=None):
         if prefix_length is None:
@@ -679,5 +807,5 @@ class Processor(object):
             detach().cpu().numpy()
         display_animations(pos_pred_np, self.joint_parents, save=True,
                            dataset_name=self.dataset,
-                           subset_name='epoch_' + str(self.best_accu_epoch),
+                           subset_name='epoch_' + str(self.best_ser_accu_epoch),
                            overwrite=True)

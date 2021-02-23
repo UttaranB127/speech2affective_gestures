@@ -12,21 +12,40 @@ import processor
 
 from os.path import join as j
 
+from config.parse_args import parse_args
 
 warnings.filterwarnings('ignore')
 
 
 base_path = os.path.dirname(os.path.realpath(__file__))
-data_path = os.path.join(base_path, '../../data')
+data_path = j(base_path, '../../data')
 
 models_ser_path = j(base_path, 'models', 'ser')
+models_s2eg_path = j(base_path, 'models', 's2eg')
 os.makedirs(models_ser_path, exist_ok=True)
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
 parser.add_argument('--dataset-ser', type=str, default='iemocap', metavar='D-SER',
                     help='dataset to train and evaluate speech emotion recognition (default: iemocap)')
 parser.add_argument('--dataset-s2eg', type=str, default='ted_db', metavar='D-S2G',
                     help='dataset to train and evaluate speech to emotive gestures (default: ted)')
+parser.add_argument('-dap', '--dataset-s2eg-already-processed',
+                    help='Optional. Set to True if dataset has already been processed.' +
+                         'If not, or if you are not sure, set it to False.',
+                    type=str2bool, default=True)
+parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
 parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
@@ -47,7 +66,7 @@ parser.add_argument('--num-epoch', type=int, default=5000, metavar='NE',
                     help='number of epochs to train (default: 1000)')
 # parser.add_argument('--window-length', type=int, default=1, metavar='WL',
 #                     help='max number of past time steps to take as input to transformer decoder (default: 60)')
-parser.add_argument('--optimizer', type=str, default='Adam', metavar='O',
+parser.add_argument('--ser-optimizer', type=str, default='Adam', metavar='SER-O',
                     help='optimizer (default: Adam)')
 parser.add_argument('--base-lr', type=float, default=1e-3, metavar='LR',
                     help='base learning rate (default: 1e-2)')
@@ -96,27 +115,37 @@ parser.add_argument('--save-log', action='store_true', default=True,
 args = parser.parse_args()
 randomized = False
 
-args.work_dir_ser = os.path.join(models_ser_path, args.dataset_ser)
-os.makedirs(args.work_dir_ser, exist_ok=True)
+config_args = parse_args()
 
-train_data_wav, eval_data_wav, test_data_wav,\
-    train_labels_dim, eval_labels_dim, test_labels_dim,\
-    means, stds = loader.load_ted_db_data(data_path, args.dataset_s2eg)
+train_data_ted, eval_data_ted, test_data_ted = loader.load_ted_db_data(data_path,
+                                                                       args.dataset_s2eg,
+                                                                       config_args,
+                                                                       args.dataset_s2eg_already_processed)
+pose_dim = 27  # 9 x 3
 
-# train_data_wav, eval_data_wav, test_data_wav, \
-#     train_labels_cat, eval_labels_cat, test_labels_cat, \
-#     train_labels_dim, eval_labels_dim, test_labels_dim, \
-#     means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
+train_data_wav, eval_data_wav, test_data_wav, \
+    train_labels_cat, eval_labels_cat, test_labels_cat, \
+    train_labels_dim, eval_labels_dim, test_labels_dim, \
+    means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
 
 _, wav_channels, wav_height, wav_width = train_data_wav.shape
+num_emo_cats = train_labels_cat.shape[-1]
 num_emo_dims = train_labels_dim.shape[-1]
 
-data_loader = dict(train_data=train_data_wav, train_labels_cat=train_labels_cat, train_labels_dim=train_labels_dim,
-                   eval_data=eval_data_wav, eval_labels_cat=eval_labels_cat, eval_labels_dim=eval_labels_dim,
-                   test_data=test_data_wav, test_labels_cat=test_labels_cat, test_labels_dim=test_labels_dim,)
+args.work_dir_ser = j(models_ser_path, args.dataset_ser + '_{:02d}_cats'.format(num_emo_cats))
+args.work_dir_s2eg = j(models_s2eg_path, args.dataset_s2eg)
+os.makedirs(args.work_dir_ser, exist_ok=True)
 
-pr = processor.Processor(args, data_path, data_loader,
-                         wav_channels, wav_height, wav_width, num_emo_dims,
+data_loader = dict(train_data_ser=train_data_wav, train_data_s2eg=train_data_ted,
+                   train_labels_cat=train_labels_cat, train_labels_dim=train_labels_dim,
+                   eval_data_ser=eval_data_wav, eval_data_s2eg=eval_data_ted,
+                   eval_labels_cat=eval_labels_cat, eval_labels_dim=eval_labels_dim,
+                   test_data_ser=test_data_wav, test_data_s2eg=test_data_ted,
+                   test_labels_cat=test_labels_cat, test_labels_dim=test_labels_dim, )
+
+pr = processor.Processor(args, config_args, data_path, data_loader,
+                         wav_channels, wav_height, wav_width,
+                         num_emo_cats, num_emo_dims, pose_dim,
                          save_path=base_path)
 
 if args.train:

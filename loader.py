@@ -1,5 +1,6 @@
 # sys
 import glob
+import librosa
 import lmdb
 import numpy as np
 import os
@@ -16,6 +17,12 @@ from nltk.stem.porter import PorterStemmer
 from os.path import join as j
 from scipy.io import wavfile
 from tqdm import tqdm
+
+from utils.data_preprocessor import DataPreprocessor
+from utils.ted_db_utils import calc_spectrogram_length_from_motion_length
+from utils.vocab import Vocab
+from utils.vocab_utils import build_vocab
+
 
 emotions_names_10_cats = ['neu', 'hap', 'exc', 'sur', 'fea', 'sad', 'dis', 'ang', 'fru', 'oth']
 emotions_names_07_cats = ['neu', 'hap', 'fea', 'sad', 'dis', 'ang', 'oth']
@@ -425,7 +432,76 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         means, stds
 
 
-def load_ted_db_data(_path, dataset):
+class TedDBParams:
+    def __init__(self, lmdb_dir, n_poses, subdivision_stride, pose_resampling_fps, mean_pose, mean_dir_vec,
+                 speaker_model=None, remove_word_timing=False):
+        self.lmdb_dir = lmdb_dir
+        self.n_poses = n_poses
+        self.subdivision_stride = subdivision_stride
+        self.skeleton_resampling_fps = pose_resampling_fps
+        self.mean_dir_vec = mean_dir_vec
+        self.remove_word_timing = remove_word_timing
+
+        self.expected_audio_length = int(round(n_poses / pose_resampling_fps * 16000))
+        self.expected_spectrogram_length = calc_spectrogram_length_from_motion_length(n_poses, pose_resampling_fps)
+
+        self.lang_model = None
+
+        print('Reading data \'{}\'...'.format(lmdb_dir))
+        preloaded_dir = lmdb_dir + '_s2eg_cache'
+        if not os.path.exists(preloaded_dir):
+            print('Creating the dataset cache...')
+            assert mean_dir_vec is not None
+            if mean_dir_vec.shape[-1] != 3:
+                mean_dir_vec = mean_dir_vec.reshape(mean_dir_vec.shape[:-1] + (-1, 3))
+            n_poses_extended = int(round(n_poses * 1.25))  # some margin
+            data_sampler = DataPreprocessor(lmdb_dir, preloaded_dir, n_poses_extended,
+                                            subdivision_stride, pose_resampling_fps, mean_pose, mean_dir_vec)
+            data_sampler.run()
+        else:
+            print('Found the cache {}'.format(preloaded_dir))
+
+        # init lmdb
+        self.lmdb_env = lmdb.open(preloaded_dir, readonly=True, lock=False)
+        with self.lmdb_env.begin() as txn:
+            self.n_samples = txn.stat()['entries']
+
+        # make a speaker model
+        if speaker_model is None or speaker_model == 0:
+            precomputed_model = lmdb_dir + '_s2eg_speaker_model.pkl'
+            if not os.path.exists(precomputed_model):
+                self._make_speaker_model(lmdb_dir, precomputed_model)
+            else:
+                with open(precomputed_model, 'rb') as f:
+                    self.speaker_model = pickle.load(f)
+        else:
+            self.speaker_model = speaker_model
+    
+    def set_lang_model(self, lang_model):
+        self.lang_model = lang_model
+
+    def _make_speaker_model(self, lmdb_dir, cache_path):
+        print('  building a speaker model...')
+        speaker_model = Vocab('vid', insert_default_tokens=False)
+
+        lmdb_env = lmdb.open(lmdb_dir, readonly=True, lock=False)
+        txn = lmdb_env.begin(write=False)
+        cursor = txn.cursor()
+        for key, value in cursor:
+            video = pyarrow.deserialize(value)
+            vid = video['vid']
+            speaker_model.index_word(vid)
+
+        lmdb_env.close()
+        print('    indexed %d videos' % speaker_model.n_words)
+        self.speaker_model = speaker_model
+
+        # cache
+        with open(cache_path, 'wb') as f:
+            pickle.dump(self.speaker_model, f)
+
+
+def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False):
     partitions = ['train', 'val', 'test']
     vid_names_done = [[]] * len(partitions)
 
@@ -433,51 +509,93 @@ def load_ted_db_data(_path, dataset):
 
     # load clips and make gestures
     n_saved = 0
-    for part_idx, partition in enumerate(partitions):
-        lmdb_env = lmdb.open(j(_path, dataset, 'lmdb_{}'.format(partition)), readonly=True, lock=False)
-        save_dir_vid = j(_path, dataset, 'videos', partition)
-        save_dir_wav = j(_path, dataset, 'waves', partition)
-        os.makedirs(save_dir_vid, exist_ok=True)
-        os.makedirs(save_dir_wav, exist_ok=True)
-        num_clips = []
-        clip_start = []
-        clip_end = []
-        with lmdb_env.begin(write=False) as txn:
-            keys = [key for key, _ in txn.cursor()]
-            num_videos = len(keys)
-            vid_names_done[part_idx] = True * np.ones(num_videos, dtype=bool)
-            for key_idx, key in enumerate(keys):
-                buf = txn.get(key)
-                video = pyarrow.deserialize(buf)
-                vid_name = video['vid']
-                clips = video['clips']
-                num_clips = len(clips)
-                for clip_idx, clip in enumerate(clips):
-                    clip_start.append(clip['start_time'])
-                    clip_end.append(clip['end_time'])
-                    file_name = vid_name + '_' + str(clip_idx).zfill(3)
-                    vid_file = j(save_dir_vid, file_name + '.mp4')
-                    wav_file = j(save_dir_wav, file_name + '.wav')
-                    if vid_names_done[part_idx][key_idx] and not os.path.exists(vid_file):
-                        cmd_vid = ('ffmpeg $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
-                                   ' sed "s/.*/-ss {} -i &/") -t {} -c:v libx264 -c:a copy {}')\
-                            .format(vid_name, clip['start_time'], clip['end_time'] - clip['start_time'], vid_file)
-                        return_code = os.system(cmd_vid)
-                        if return_code != 0:
-                            vid_names_done[part_idx][key_idx] = False
-                    if vid_names_done[part_idx][key_idx] and\
-                            os.path.exists(vid_file) and not os.path.exists(wav_file):
-                        cmd_wav = 'ffmpeg -i {} -ac 2 -f wav {}'.format(vid_file, wav_file)
-                        os.system(cmd_wav)
-                    print('\rPartition: {}. Video: {} of {} ({:.2f}%). Clip: {} of {} ({:.2f}%).'
-                          .format(partition, key_idx + 1, num_videos, 100. * (key_idx + 1) / num_videos,
-                                  clip_idx + 1, num_clips, 100. * (clip_idx + 1) / num_clips), end='')
-    print()
-    num_clips = np.array(num_clips)
-    clip_start = np.array(clip_start)
-    clip_end = np.array(clip_end)
-    clip_lengths = clip_end - clip_start
-    return True
+    if not ted_db_already_processed:
+        for part_idx, partition in enumerate(partitions):
+            lmdb_env = lmdb.open(j(_path, dataset, 'lmdb_{}'.format(partition)), readonly=True, lock=False)
+            save_dir_vid = j(_path, dataset, 'videos', partition)
+            save_dir_wav = j(_path, dataset, 'waves', partition)
+            os.makedirs(save_dir_vid, exist_ok=True)
+            os.makedirs(save_dir_wav, exist_ok=True)
+            num_clips = []
+            clip_start = []
+            clip_end = []
+            with lmdb_env.begin(write=False) as txn:
+                keys = [key for key, _ in txn.cursor()]
+                num_videos = len(keys)
+                vid_names_done[part_idx] = True * np.ones(num_videos, dtype=bool)
+                for key_idx, key in enumerate(keys):
+                    buf = txn.get(key)
+                    video = pyarrow.deserialize(buf)
+                    vid_name = video['vid']
+                    clips = video['clips']
+                    num_clips = len(clips)
+                    for clip_idx, clip in enumerate(clips):
+                        clip_start.append(clip['start_time'])
+                        clip_end.append(clip['end_time'])
+                        file_name = vid_name + '_' + str(clip_idx).zfill(3)
+                        vid_file = j(save_dir_vid, file_name + '.mp4')
+                        wav_file = j(save_dir_wav, file_name + '.wav')
+                        if vid_names_done[part_idx][key_idx] and not os.path.exists(vid_file):
+                            cmd_vid = ('ffmpeg $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
+                                       ' sed \'s/.*/-ss {} -i &/\') -t {} -c:v libx264 -c:a copy {}')\
+                                .format(vid_name, clip['start_time'], clip['end_time'] - clip['start_time'], vid_file)
+                            return_code = os.system(cmd_vid)
+                            if return_code != 0:
+                                vid_names_done[part_idx][key_idx] = False
+                        if vid_names_done[part_idx][key_idx] and\
+                                os.path.exists(vid_file) and not os.path.exists(wav_file):
+                            cmd_wav = 'ffmpeg -i {} -ac 2 -f wav {}'.format(vid_file, wav_file)
+                            os.system(cmd_wav)
+                        print('\rPartition: {}. Video: {} of {} ({:.2f}%). Clip: {} of {} ({:.2f}%).'
+                              .format(partition, key_idx + 1, num_videos, 100. * (key_idx + 1) / num_videos,
+                                      clip_idx + 1, num_clips, 100. * (clip_idx + 1) / num_clips), end='')
+        print()
+
+    # for part_idx, partition in enumerate(partitions):
+    #     dir_wav = j(_path, dataset, 'waves', partition)
+    #     wav_files = glob.glob(j(dir_wav, '*'))
+    #     for wav_file in wav_files:
+    #         audio_raw = librosa.load(wav_file, mono=True, sr=16000, res_type='kaiser_fast')
+
+    mean_dir_vec = np.array(config_args.mean_dir_vec).reshape(-1, 3)
+    train_dataset = TedDBParams(config_args.train_data_path[0],
+                                n_poses=config_args.n_poses,
+                                subdivision_stride=config_args.subdivision_stride,
+                                pose_resampling_fps=config_args.motion_resampling_framerate,
+                                mean_dir_vec=mean_dir_vec,
+                                mean_pose=config_args.mean_pose,
+                                remove_word_timing=(config_args.input_context == 'text')
+                                )
+
+    eval_dataset = TedDBParams(config_args.val_data_path[0],
+                               n_poses=config_args.n_poses,
+                               subdivision_stride=config_args.subdivision_stride,
+                               pose_resampling_fps=config_args.motion_resampling_framerate,
+                               speaker_model=train_dataset.speaker_model,
+                               mean_dir_vec=mean_dir_vec,
+                               mean_pose=config_args.mean_pose,
+                               remove_word_timing=(config_args.input_context == 'text')
+                               )
+
+    test_dataset = TedDBParams(config_args.test_data_path[0],
+                               n_poses=config_args.n_poses,
+                               subdivision_stride=config_args.subdivision_stride,
+                               pose_resampling_fps=config_args.motion_resampling_framerate,
+                               speaker_model=train_dataset.speaker_model,
+                               mean_dir_vec=mean_dir_vec,
+                               mean_pose=config_args.mean_pose)
+
+    # build vocab
+    vocab_cache_path = j(os.path.split(config_args.train_data_path[0])[0],
+                         'vocab_models_s2eg',
+                         'vocab_cache.pkl')
+    lang_model = build_vocab('words', [train_dataset, eval_dataset, test_dataset],
+                             vocab_cache_path, config_args.wordembed_path,
+                             config_args.wordembed_dim)
+    train_dataset.set_lang_model(lang_model)
+    eval_dataset.set_lang_model(lang_model)
+
+    return train_dataset, eval_dataset, test_dataset
 
 
 def build_vocab_idx(word_instants, min_word_count):

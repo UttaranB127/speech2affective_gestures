@@ -557,23 +557,11 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
     data_wav_files = [j(processed_dir, 'train_data_wav.npz'),
                       j(processed_dir, 'eval_data_wav.npz'),
                       j(processed_dir, 'test_data_wav.npz')]
-    train_labels_cat_file = j(processed_dir, 'train_labels_cat.npz')
-    eval_labels_cat_file = j(processed_dir, 'eval_labels_cat.npz')
-    test_labels_cat_file = j(processed_dir, 'test_labels_cat.npz')
-    train_labels_dim_file = j(processed_dir, 'train_labels_dim.npz')
-    eval_labels_dim_file = j(processed_dir, 'eval_labels_dim.npz')
-    test_labels_dim_file = j(processed_dir, 'test_labels_dim.npz')
     stats_file = j(processed_dir, 'stats.pkl')
 
-    if not (os.path.exists(data_wav_files)
-            and os.path.exists(data_wav_files)
-            and os.path.exists(data_wav_files)
-            and os.path.exists(train_labels_cat_file)
-            and os.path.exists(eval_labels_cat_file)
-            and os.path.exists(test_labels_cat_file)
-            and os.path.exists(train_labels_dim_file)
-            and os.path.exists(eval_labels_dim_file)
-            and os.path.exists(test_labels_dim_file)
+    if not (os.path.exists(data_wav_files[0])
+            and os.path.exists(data_wav_files[1])
+            and os.path.exists(data_wav_files[2])
             and os.path.exists(stats_file)):
         max0 = None
         min0 = None

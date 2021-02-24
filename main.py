@@ -123,10 +123,12 @@ randomized = False
 
 config_args = parse_args()
 
-train_data_ted, eval_data_ted, test_data_ted = loader.load_ted_db_data(data_path,
-                                                                       args.dataset_s2eg,
-                                                                       config_args,
-                                                                       args.dataset_s2eg_already_processed)
+train_data_ted, eval_data_ted, test_data_ted,\
+    train_data_ted_wav, eval_data_ted_wav, test_data_ted_wav,\
+    ted_wav_max_all, ted_wav_min_all, = loader.load_ted_db_data(data_path,
+                                                                args.dataset_s2eg,
+                                                                config_args,
+                                                                args.dataset_s2eg_already_processed)
 pose_dim = 27  # 9 x 3
 
 train_data_wav, eval_data_wav, test_data_wav, \

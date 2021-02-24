@@ -149,12 +149,13 @@ class Processor(object):
                                     F1=self.F1, bidirectional=self.bidirectional,
                                     dropout_keep_prob=self.dropout_keep_prob)
         lang_model = self.data_loader['train_data_s2eg'].lang_model
-        self.speaker_model = self.data_loader['train_data_s2eg'].speaker_model
+        self.train_speaker_model = self.data_loader['train_data_s2eg'].speaker_model
+        self.eval_speaker_model = self.data_loader['eval_data_s2eg'].speaker_model
         self.s2eg_generator = PoseGenerator(self.config_args,
                                             n_words=lang_model.n_words,
                                             word_embed_size=self.config_args.wordembed_dim,
                                             word_embeddings=lang_model.word_embedding_weights,
-                                            z_obj=self.speaker_model,
+                                            z_obj=self.train_speaker_model,
                                             pose_dim=self.P)
         self.s2eg_discriminator = ConvDiscriminator(self.P)
 
@@ -376,8 +377,12 @@ class Processor(object):
                 batch_audio[i] = audio
                 batch_spectrogram[i] = spectrogram
                 # speaker input
-                if self.speaker_model and self.speaker_model.__class__.__name__ == 'Vocab':
-                    batch_vid_indices[i] = torch.LongTensor([self.speaker_model.word2index[aux_info['vid']]])
+                if train:
+                    if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
+                        batch_vid_indices[i] = torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
+                else:
+                    if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
+                        batch_vid_indices[i] = torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
 
             yield batch_data_ser, batch_labels_cat,\
                 batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq,\

@@ -501,7 +501,8 @@ class TedDBParams:
             pickle.dump(self.speaker_model, f)
 
 
-def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False):
+def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False,
+                     block_size=300, filter_num=40):
     partitions = ['train', 'val', 'test']
     vid_names_done = [[]] * len(partitions)
 
@@ -551,6 +552,138 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
                                       clip_idx + 1, num_clips, 100. * (clip_idx + 1) / num_clips), end='')
         print()
 
+    processed_dir = j(_path, dataset, 'processed')
+    os.makedirs(processed_dir, exist_ok=True)
+    data_wav_files = [j(processed_dir, 'train_data_wav.npz'),
+                      j(processed_dir, 'eval_data_wav.npz'),
+                      j(processed_dir, 'test_data_wav.npz')]
+    train_labels_cat_file = j(processed_dir, 'train_labels_cat.npz')
+    eval_labels_cat_file = j(processed_dir, 'eval_labels_cat.npz')
+    test_labels_cat_file = j(processed_dir, 'test_labels_cat.npz')
+    train_labels_dim_file = j(processed_dir, 'train_labels_dim.npz')
+    eval_labels_dim_file = j(processed_dir, 'eval_labels_dim.npz')
+    test_labels_dim_file = j(processed_dir, 'test_labels_dim.npz')
+    stats_file = j(processed_dir, 'stats.pkl')
+
+    if not (os.path.exists(data_wav_files)
+            and os.path.exists(data_wav_files)
+            and os.path.exists(data_wav_files)
+            and os.path.exists(train_labels_cat_file)
+            and os.path.exists(eval_labels_cat_file)
+            and os.path.exists(test_labels_cat_file)
+            and os.path.exists(train_labels_dim_file)
+            and os.path.exists(eval_labels_dim_file)
+            and os.path.exists(test_labels_dim_file)
+            and os.path.exists(stats_file)):
+        max0 = None
+        min0 = None
+        max1 = None
+        min1 = None
+        max2 = None
+        min2 = None
+        for part_idx, partition in enumerate(partitions):
+            save_dir_wav = j(_path, dataset, 'waves', partition)
+            wav_files = glob.glob(j(save_dir_wav, '*.wav'))
+            num_wav_files = len(wav_files)
+            data_wav = np.zeros((num_wav_files, 3, block_size, filter_num))
+            for wav_idx, wav_file_name in enumerate(wav_files):
+                data, time, rate = read_wav_file(wav_file_name)
+                mel_spec = ps.logfbank(data, rate, nfilt=filter_num, nfft=2048)
+                delta1 = ps.delta(mel_spec, 2)
+                delta2 = ps.delta(delta1, 2)
+
+                time = mel_spec.shape[0]
+                if time <= block_size:
+                    part = mel_spec
+                    delta11 = delta1
+                    delta21 = delta2
+                    part = np.pad(part, ((0, block_size - part.shape[0]), (0, 0)), 'constant',
+                                  constant_values=0)
+                    delta11 = np.pad(delta11, ((0, block_size - delta11.shape[0]), (0, 0)), 'constant',
+                                     constant_values=0)
+                    delta21 = np.pad(delta21, ((0, block_size - delta21.shape[0]), (0, 0)), 'constant',
+                                     constant_values=0)
+                    # train_data_1[train_num * block_size:(train_num + 1) * block_size] = part
+                    # train_data_2[train_num * block_size:(train_num + 1) * block_size] = delta11
+                    # train_data_3[train_num * block_size:(train_num + 1) * block_size] = delta21
+                    data_wav[wav_idx, 0] = part
+                    data_wav[wav_idx, 1] = delta11
+                    data_wav[wav_idx, 2] = delta21
+                else:
+                    for begin in np.arange(0, time, 100):
+                        end = begin + block_size
+                        end_from_last = time - begin
+                        begin_from_last = end_from_last - block_size
+                        if end > time:
+                            break
+
+                        part = mel_spec[begin:end, :]
+                        delta11 = delta1[begin:end, :]
+                        delta21 = delta2[begin:end, :]
+                        part_from_last = mel_spec[begin_from_last:end_from_last, :]
+                        delta11_from_last = delta1[begin_from_last:end_from_last, :]
+                        delta21_from_last = delta2[begin_from_last:end_from_last, :]
+
+                        data_wav[wav_idx, 0] = part
+                        data_wav[wav_idx, 1] = delta11
+                        data_wav[wav_idx, 2] = delta21
+
+                        # data_wav_list_1.append(part_from_last.tolist())
+                        # data_wav_list_2.append(delta11_from_last.tolist())
+                        # data_wav_list_3.append(delta21_from_last.tolist())
+                        # data_count += 2
+                print('\rPartition: {}. File: {} of {} ({:.2f}%).'
+                      .format(partition, wav_idx + 1, num_wav_files,
+                              100. * (wav_idx + 1) / num_wav_files), end='')
+
+            # mean1 = np.mean(train_data_wav_1, axis=(0, 1))
+            # std1 = np.std(train_data_wav_1, axis=(0, 1))
+            # mean2 = np.mean(train_data_wav_2, axis=(0, 1))
+            # std2 = np.std(train_data_wav_2, axis=(0, 1))
+            # mean3 = np.mean(train_data_wav_3, axis=(0, 1))
+            # std3 = np.std(train_data_wav_3, axis=(0, 1))
+            # train_data_wav = np.moveaxis(np.array([(train_data_wav_1 - mean1) / (std1 + epsilon),
+            #                                        (train_data_wav_2 - mean2) / (std2 + epsilon),
+            #                                        (train_data_wav_3 - mean3) / (std3 + epsilon)]),
+            #                              0, 1)
+            # eval_data_wav = np.moveaxis(np.array([(eval_data_wav_1 - mean1) / (std1 + epsilon),
+            #                                       (eval_data_wav_2 - mean2) / (std2 + epsilon),
+            #                                       (eval_data_wav_3 - mean3) / (std3 + epsilon)]),
+            #                             0, 1)
+            # test_data_wav = np.moveaxis(np.array([(test_data_wav_1 - mean1) / (std1 + epsilon),
+            #                                       (test_data_wav_2 - mean2) / (std2 + epsilon),
+            #                                       (test_data_wav_3 - mean3) / (std3 + epsilon)]),
+            #                             0, 1)
+
+            if part_idx == 0:
+                max0 = np.max(data_wav[:, 0])
+                min0 = np.min(data_wav[:, 0])
+                max1 = np.max(data_wav[:, 1])
+                min1 = np.min(data_wav[:, 1])
+                max2 = np.max(data_wav[:, 2])
+                min2 = np.min(data_wav[:, 2])
+
+            data_wav[:, 0] = (data_wav[:, 0] - min0) / (max0 - min0)
+            data_wav[:, 1] = (data_wav[:, 1] - min0) / (max0 - min0)
+            data_wav[:, 2] = (data_wav[:, 2] - min0) / (max0 - min0)
+
+            np.savez_compressed(data_wav_files[part_idx], data_wav)
+            print('\nSuccessfully saved wave {} data.'.format(partition))
+
+            if part_idx == 0:
+                with open(stats_file, 'wb') as af:
+                    pickle.dump((max0, min0, max1, min1, max2, min2), af)
+                print('Successfully saved stats.')
+
+    train_data_wav = np.load(data_wav_files[0])['arr_0']
+    eval_data_wav = np.load(data_wav_files[1])['arr_0']
+    test_data_wav = np.load(data_wav_files[2])['arr_0']
+
+    with open(stats_file, 'rb') as af:
+        stats = pickle.load(af)
+    max_all = np.array(stats[:3])
+    min_all = np.array(stats[4:])
+
     # for part_idx, partition in enumerate(partitions):
     #     dir_wav = j(_path, dataset, 'waves', partition)
     #     wav_files = glob.glob(j(dir_wav, '*'))
@@ -571,7 +704,6 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
                                n_poses=config_args.n_poses,
                                subdivision_stride=config_args.subdivision_stride,
                                pose_resampling_fps=config_args.motion_resampling_framerate,
-                               speaker_model=train_dataset.speaker_model,
                                mean_dir_vec=mean_dir_vec,
                                mean_pose=config_args.mean_pose,
                                remove_word_timing=(config_args.input_context == 'text')
@@ -581,7 +713,6 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
                                n_poses=config_args.n_poses,
                                subdivision_stride=config_args.subdivision_stride,
                                pose_resampling_fps=config_args.motion_resampling_framerate,
-                               speaker_model=train_dataset.speaker_model,
                                mean_dir_vec=mean_dir_vec,
                                mean_pose=config_args.mean_pose)
 
@@ -595,7 +726,8 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
     train_dataset.set_lang_model(lang_model)
     eval_dataset.set_lang_model(lang_model)
 
-    return train_dataset, eval_dataset, test_dataset
+    return train_dataset, eval_dataset, test_dataset,\
+        train_data_wav, eval_data_wav, test_data_wav, max_all, min_all
 
 
 def build_vocab_idx(word_instants, min_word_count):

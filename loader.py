@@ -533,7 +533,7 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
                     for clip_idx, clip in enumerate(clips):
                         clip_start.append(clip['start_time'])
                         clip_end.append(clip['end_time'])
-                        file_name = vid_name + '_' + str(clip_idx).zfill(3)
+                        file_name = vid_name + '_' + str(clip['start_time']) + '_' + str(clip['end_time'])
                         vid_file = j(save_dir_vid, file_name + '.mp4')
                         wav_file = j(save_dir_wav, file_name + '.wav')
                         if vid_names_done[part_idx][key_idx] and not os.path.exists(vid_file):
@@ -557,6 +557,9 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
     data_wav_files = [j(processed_dir, 'train_data_wav.npz'),
                       j(processed_dir, 'eval_data_wav.npz'),
                       j(processed_dir, 'test_data_wav.npz')]
+    data_wav_dict_files = [j(processed_dir, 'train_data_wav_dict.pkl'),
+                           j(processed_dir, 'eval_data_wav_dict.pkl'),
+                           j(processed_dir, 'test_data_wav_dict.pkl')]
     stats_file = j(processed_dir, 'stats.pkl')
 
     if not (os.path.exists(data_wav_files[0])
@@ -574,7 +577,16 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
             wav_files = glob.glob(j(save_dir_wav, '*.wav'))
             num_wav_files = len(wav_files)
             data_wav = np.zeros((num_wav_files, 3, block_size, filter_num))
+            data_wav_dict = dict()
             for wav_idx, wav_file_name in enumerate(wav_files):
+                wav_file_name_split = '.'.join(wav_file_name.split('.')[:-1]).split('_')
+                vid_name = '_'.join(wav_file_name_split[:-2])
+                clip_start = wav_file_name_split[-2]
+                clip_end = wav_file_name_split[-1]
+                if vid_name not in data_wav_dict.keys():
+                    data_wav_dict[vid_name] = dict()
+                data_wav_dict[vid_name][clip_start + '_' + clip_end] = wav_idx
+
                 data, time, rate = read_wav_file(wav_file_name)
                 mel_spec = ps.logfbank(data, rate, nfilt=filter_num, nfft=2048)
                 delta1 = ps.delta(mel_spec, 2)
@@ -656,6 +668,8 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
             data_wav[:, 2] = (data_wav[:, 2] - min0) / (max0 - min0)
 
             np.savez_compressed(data_wav_files[part_idx], data_wav)
+            with open(data_wav_dict_files[part_idx], 'wb') as df:
+                pickle.dump(data_wav_dict, df)
             print('\nSuccessfully saved wave {} data.'.format(partition))
 
             if part_idx == 0:
@@ -664,8 +678,14 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
                 print('Successfully saved stats.')
 
     train_data_wav = np.load(data_wav_files[0])['arr_0']
+    with open(data_wav_dict_files[0], 'rb') as df:
+        train_wav_dict = pickle.load(df)
     eval_data_wav = np.load(data_wav_files[1])['arr_0']
+    with open(data_wav_dict_files[1], 'rb') as df:
+        eval_wav_dict = pickle.load(df)
     test_data_wav = np.load(data_wav_files[2])['arr_0']
+    with open(data_wav_dict_files[2], 'rb') as df:
+        test_wav_dict = pickle.load(df)
 
     with open(stats_file, 'rb') as af:
         stats = pickle.load(af)
@@ -715,7 +735,9 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
     eval_dataset.set_lang_model(lang_model)
 
     return train_dataset, eval_dataset, test_dataset,\
-        train_data_wav, eval_data_wav, test_data_wav, max_all, min_all
+        train_data_wav, eval_data_wav, test_data_wav,\
+        train_wav_dict, eval_wav_dict, test_wav_dict,\
+        max_all, min_all
 
 
 def build_vocab_idx(word_instants, min_word_count):

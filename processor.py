@@ -278,6 +278,7 @@ class Processor(object):
 
     def yield_batch(self, train):
         batch_data_ser = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).cuda()
+        batch_data_s2eg = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).cuda()
         batch_labels_cat = torch.zeros(self.args.batch_size).long().cuda()
         batch_word_seq_tensor = torch.zeros((self.args.batch_size, 34)).long().cuda()
         batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().cuda()
@@ -290,10 +291,14 @@ class Processor(object):
 
         if train:
             data_ser_np = self.data_loader['train_data_ser']
+            data_s2eg_np = self.data_loader['train_data_s2eg_wav']
+            data_s2eg_dict = self.data_loader['train_data_s2eg_wav_dict']
             data_s2eg = self.data_loader['train_data_s2eg']
             labels_np = self.data_loader['train_labels_cat']
         else:
             data_ser_np = self.data_loader['eval_data_ser']
+            data_s2eg_np = self.data_loader['eval_data_s2eg_wav']
+            data_s2eg_dict = self.data_loader['eval_data_s2eg_wav_dict']
             data_s2eg = self.data_loader['eval_data_s2eg']
             labels_np = self.data_loader['eval_labels_cat']
 
@@ -309,9 +314,13 @@ class Processor(object):
                 with data_s2eg.lmdb_env.begin(write=False) as txn:
                     key = '{:010}'.format(k).encode('ascii')
                     sample = txn.get(key)
-
                     sample = pyarrow.deserialize(sample)
                     word_seq, pose_seq, vec_seq, audio, spectrogram, aux_info = sample
+
+                    vid_name = sample[-1]
+                    clip_start = sample[-1]
+                    clip_end = sample[-1]
+                    batch_data_s2eg[i] = data_s2eg_np[data_s2eg_dict[vid_name][clip_start + '_' + clip_end]]
 
                 def extend_word_seq(lang, words, end_time=None):
                     n_frames = data_s2eg.n_poses

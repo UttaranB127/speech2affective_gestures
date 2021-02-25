@@ -317,9 +317,9 @@ class Processor(object):
                     sample = pyarrow.deserialize(sample)
                     word_seq, pose_seq, vec_seq, audio, spectrogram, aux_info = sample
 
-                    vid_name = sample[-1]
-                    clip_start = sample[-1]
-                    clip_end = sample[-1]
+                    vid_name = sample[-1]['vid']
+                    clip_start = str(sample[-1]['start_time'])
+                    clip_end = str(sample[-1]['end_time'])
                     batch_data_s2eg[i] = data_s2eg_np[data_s2eg_dict[vid_name][clip_start + '_' + clip_end]]
 
                 def extend_word_seq(lang, words, end_time=None):

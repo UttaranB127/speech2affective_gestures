@@ -44,7 +44,7 @@ parser.add_argument('--dataset-s2eg', type=str, default='ted_db', metavar='D-S2G
 parser.add_argument('-dap', '--dataset-s2eg-already-processed',
                     help='Optional. Set to True if dataset has already been processed.' +
                          'If not, or if you are not sure, set it to False.',
-                    type=str2bool, default=True)
+                    type=str2bool, default=False)
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')

@@ -2,6 +2,7 @@
 import glob
 import librosa
 import lmdb
+import multiprocessing
 import numpy as np
 import os
 import pickle
@@ -13,6 +14,7 @@ import wave
 
 import utils.constant as constant
 
+from joblib import Parallel, delayed
 from nltk.stem.porter import PorterStemmer
 from os.path import join as j
 from scipy.io import wavfile
@@ -501,6 +503,34 @@ class TedDBParams:
             pickle.dump(self.speaker_model, f)
 
 
+def download_clips(vid_name, start_time, end_time, start_frame, end_frame, save_dir_vid, save_dir_wav):
+    file_name = vid_name + '_' + str(start_frame) + '_' + str(end_frame)
+    # wav_file = j(save_dir_wav, file_name + '.wav')
+    # if not os.path.exists(wav_file):
+    #     cmd_wav = ('ffmpeg $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
+    #                ' sed \'s/.*/-ss {} -i &/\') -t {} -c:a copy {}')\
+    #         .format(vid_name, video[-1]['start_time'],
+    #                 video[-1]['end_time'] - video[-1]['start_time'], wav_file)
+    #     return_code = os.system(cmd_wav)
+    vid_file = j(save_dir_vid, file_name + '.mp4')
+    wav_file = j(save_dir_wav, file_name + '.wav')
+    # if vid_names_done[part_idx][key_idx] and not os.path.exists(vid_file):
+    if not os.path.exists(vid_file):
+        cmd_vid = ('ffmpeg -loglevel fatal $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
+                   ' sed \'s/.*/-ss {} -i &/\') -t {} -c:v libx264 -c:a copy {}') \
+            .format(vid_name, start_time, end_time - start_time, vid_file)
+        return_code = os.system(cmd_vid)
+        # if return_code != 0:
+        #     vid_names_done[part_idx][key_idx] = False
+    # if vid_names_done[part_idx][key_idx] and\
+    #         os.path.exists(vid_file) and not os.path.exists(wav_file):
+    if os.path.exists(vid_file) and not os.path.exists(wav_file):
+        cmd_wav = 'ffmpeg -loglevel fatal -i {} -ac 2 -f wav {}'.format(vid_file, wav_file)
+        os.system(cmd_wav)
+    # print('\rPartition: {}. Key: {} of {} ({:.2f}%).'
+    #       .format(partition, key_idx + 1, num_keys, 100. * (key_idx + 1) / num_keys), end='')
+
+
 def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False,
                      block_size=300, filter_num=40):
     partitions = ['train', 'val', 'test']
@@ -509,48 +539,121 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
     clip_duration_range = [5, 12]
 
     # load clips and make gestures
-    n_saved = 0
+    mean_dir_vec = np.array(config_args.mean_dir_vec).reshape(-1, 3)
+    train_dataset = TedDBParams(config_args.train_data_path[0],
+                                n_poses=config_args.n_poses,
+                                subdivision_stride=config_args.subdivision_stride,
+                                pose_resampling_fps=config_args.motion_resampling_framerate,
+                                mean_dir_vec=mean_dir_vec,
+                                mean_pose=config_args.mean_pose,
+                                remove_word_timing=(config_args.input_context == 'text')
+                                )
+
+    eval_dataset = TedDBParams(config_args.val_data_path[0],
+                               n_poses=config_args.n_poses,
+                               subdivision_stride=config_args.subdivision_stride,
+                               pose_resampling_fps=config_args.motion_resampling_framerate,
+                               mean_dir_vec=mean_dir_vec,
+                               mean_pose=config_args.mean_pose,
+                               remove_word_timing=(config_args.input_context == 'text')
+                               )
+
+    test_dataset = TedDBParams(config_args.test_data_path[0],
+                               n_poses=config_args.n_poses,
+                               subdivision_stride=config_args.subdivision_stride,
+                               pose_resampling_fps=config_args.motion_resampling_framerate,
+                               mean_dir_vec=mean_dir_vec,
+                               mean_pose=config_args.mean_pose)
+
+    # build vocab
+    vocab_cache_path = j(os.path.split(config_args.train_data_path[0])[0],
+                         'vocab_models_s2eg',
+                         'vocab_cache.pkl')
+    lang_model = build_vocab('words', [train_dataset, eval_dataset, test_dataset],
+                             vocab_cache_path, config_args.wordembed_path,
+                             config_args.wordembed_dim)
+    train_dataset.set_lang_model(lang_model)
+    eval_dataset.set_lang_model(lang_model)
+
     if not ted_db_already_processed:
         for part_idx, partition in enumerate(partitions):
-            lmdb_env = lmdb.open(j(_path, dataset, 'lmdb_{}'.format(partition)), readonly=True, lock=False)
+            lmdb_env = lmdb.open(j(_path, dataset, 'lmdb_{}_s2eg_cache'.format(partition)),
+                                 readonly=True, lock=False)
             save_dir_vid = j(_path, dataset, 'videos', partition)
             save_dir_wav = j(_path, dataset, 'waves', partition)
             os.makedirs(save_dir_vid, exist_ok=True)
             os.makedirs(save_dir_wav, exist_ok=True)
-            num_clips = []
-            clip_start = []
-            clip_end = []
             with lmdb_env.begin(write=False) as txn:
-                keys = [key for key, _ in txn.cursor()]
-                num_videos = len(keys)
-                vid_names_done[part_idx] = True * np.ones(num_videos, dtype=bool)
-                for key_idx, key in enumerate(keys):
+                vid_names = []
+                start_frames = []
+                end_frames = []
+                start_times = []
+                end_times = []
+                num_keys = 0
+                # keys = [key for key, _ in txn.cursor()]
+                # num_keys = len(keys)
+                # vid_names = [''] * num_keys
+                # start_frames = [0] * num_keys
+                # end_frames = [0] * num_keys
+                # start_times = [0.] * num_keys
+                # end_times = [0.] * num_keys
+                # for _key_idx, key in enumerate(keys):
+                for key, _ in txn.cursor():
                     buf = txn.get(key)
                     video = pyarrow.deserialize(buf)
-                    vid_name = video['vid']
-                    clips = video['clips']
-                    num_clips = len(clips)
-                    for clip_idx, clip in enumerate(clips):
-                        clip_start.append(clip['start_time'])
-                        clip_end.append(clip['end_time'])
-                        file_name = vid_name + '_' + str(clip['start_time']) + '_' + str(clip['end_time'])
-                        vid_file = j(save_dir_vid, file_name + '.mp4')
-                        wav_file = j(save_dir_wav, file_name + '.wav')
-                        if vid_names_done[part_idx][key_idx] and not os.path.exists(vid_file):
-                            cmd_vid = ('ffmpeg $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
-                                       ' sed \'s/.*/-ss {} -i &/\') -t {} -c:v libx264 -c:a copy {}')\
-                                .format(vid_name, clip['start_time'], clip['end_time'] - clip['start_time'], vid_file)
-                            return_code = os.system(cmd_vid)
-                            if return_code != 0:
-                                vid_names_done[part_idx][key_idx] = False
-                        if vid_names_done[part_idx][key_idx] and\
-                                os.path.exists(vid_file) and not os.path.exists(wav_file):
-                            cmd_wav = 'ffmpeg -i {} -ac 2 -f wav {}'.format(vid_file, wav_file)
-                            os.system(cmd_wav)
-                        print('\rPartition: {}. Video: {} of {} ({:.2f}%). Clip: {} of {} ({:.2f}%).'
-                              .format(partition, key_idx + 1, num_videos, 100. * (key_idx + 1) / num_videos,
-                                      clip_idx + 1, num_clips, 100. * (clip_idx + 1) / num_clips), end='')
-        print()
+                    vid_names.append(video[-1]['vid'])
+                    start_frames.append(video[-1]['start_frame_no'])
+                    end_frames.append(video[-1]['end_frame_no'])
+                    start_times.append(video[-1]['start_time'])
+                    end_times.append(video[-1]['end_time'])
+                    num_keys += 1
+                    # vid_names[_key_idx] = video[-1]['vid']
+                    # start_frames[_key_idx] = video[-1]['start_frame_no']
+                    # end_frames[_key_idx] = video[-1]['end_frame_no']
+                    # start_times[_key_idx] = video[-1]['start_time']
+                    # end_times[_key_idx] = video[-1]['end_time']
+                    # print('\rPartition: {}. Key {} of {}.'.format(partition, _key_idx + 1, num_keys), end='')
+                    print('\rPartition: {}. Key {}.'.format(partition, num_keys), end='')
+                # vid_names_done[part_idx] = True * np.ones(num_keys, dtype=bool)
+
+                # for key_idx, key in enumerate(keys):
+                # def download_clips(key):
+                #     buf = txn.get(key)
+                #     video = pyarrow.deserialize(buf)
+                #     vid_name = video[-1]['vid']
+                #     file_name = vid_name + '_' + str(video[-1]['start_frame_no']) +\
+                #         '_' + str(video[-1]['end_frame_no'])
+                #     # wav_file = j(save_dir_wav, file_name + '.wav')
+                #     # if not os.path.exists(wav_file):
+                #     #     cmd_wav = ('ffmpeg $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
+                #     #                ' sed \'s/.*/-ss {} -i &/\') -t {} -c:a copy {}')\
+                #     #         .format(vid_name, video[-1]['start_time'],
+                #     #                 video[-1]['end_time'] - video[-1]['start_time'], wav_file)
+                #     #     return_code = os.system(cmd_wav)
+                #     vid_file = j(save_dir_vid, file_name + '.mp4')
+                #     wav_file = j(save_dir_wav, file_name + '.wav')
+                #     # if vid_names_done[part_idx][key_idx] and not os.path.exists(vid_file):
+                #     if not os.path.exists(vid_file):
+                #         cmd_vid = ('ffmpeg -loglevel fatal $(youtube-dl -g \'https://www.youtube.com/watch?v={}\' |'
+                #                    ' sed \'s/.*/-ss {} -i &/\') -t {} -c:v libx264 -c:a copy {}')\
+                #             .format(vid_name, video[-1]['start_time'],
+                #                     video[-1]['end_time'] - video[-1]['start_time'], vid_file)
+                #         return_code = os.system(cmd_vid)
+                #         # if return_code != 0:
+                #         #     vid_names_done[part_idx][key_idx] = False
+                #     # if vid_names_done[part_idx][key_idx] and\
+                #     #         os.path.exists(vid_file) and not os.path.exists(wav_file):
+                #     if os.path.exists(vid_file) and not os.path.exists(wav_file):
+                #         cmd_wav = 'ffmpeg -loglevel fatal -i {} -ac 2 -f wav {}'.format(vid_file, wav_file)
+                #         os.system(cmd_wav)
+                #     # print('\rPartition: {}. Key: {} of {} ({:.2f}%).'
+                #     #       .format(partition, key_idx + 1, num_keys, 100. * (key_idx + 1) / num_keys), end='')
+
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            pool.starmap(download_clips, [(vid_names[key_idx], start_times[key_idx], end_times[key_idx],
+                                           start_frames[key_idx], end_frames[key_idx],
+                                           save_dir_vid, save_dir_wav) for key_idx in tqdm(range(num_keys))])
+    print('\nDownload complete.')
 
     processed_dir = j(_path, dataset, 'processed')
     os.makedirs(processed_dir, exist_ok=True)
@@ -579,16 +682,16 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
             data_wav = np.zeros((num_wav_files, 3, block_size, filter_num))
             data_wav_dict = dict()
             for wav_idx, wav_file_name in enumerate(wav_files):
-                wav_file_name_split = '.'.join(wav_file_name.split('.')[:-1]).split('_')
+                wav_file_name_split = '.'.join(wav_file_name.split('.')[:-1]).split('/')[-1].split('_')
                 vid_name = '_'.join(wav_file_name_split[:-2])
-                clip_start = wav_file_name_split[-2]
-                clip_end = wav_file_name_split[-1]
+                start_frame = wav_file_name_split[-2]
+                end_frame = wav_file_name_split[-1]
                 if vid_name not in data_wav_dict.keys():
                     data_wav_dict[vid_name] = dict()
-                data_wav_dict[vid_name][clip_start + '_' + clip_end] = wav_idx
+                data_wav_dict[vid_name][start_frame + '_' + end_frame] = wav_idx
 
                 data, time, rate = read_wav_file(wav_file_name)
-                mel_spec = ps.logfbank(data, rate, nfilt=filter_num, nfft=2048)
+                mel_spec = ps.logfbank(data, rate, nfilt=filter_num)  # , nfft=2048)
                 delta1 = ps.delta(mel_spec, 2)
                 delta2 = ps.delta(delta1, 2)
 
@@ -697,42 +800,6 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
     #     wav_files = glob.glob(j(dir_wav, '*'))
     #     for wav_file in wav_files:
     #         audio_raw = librosa.load(wav_file, mono=True, sr=16000, res_type='kaiser_fast')
-
-    mean_dir_vec = np.array(config_args.mean_dir_vec).reshape(-1, 3)
-    train_dataset = TedDBParams(config_args.train_data_path[0],
-                                n_poses=config_args.n_poses,
-                                subdivision_stride=config_args.subdivision_stride,
-                                pose_resampling_fps=config_args.motion_resampling_framerate,
-                                mean_dir_vec=mean_dir_vec,
-                                mean_pose=config_args.mean_pose,
-                                remove_word_timing=(config_args.input_context == 'text')
-                                )
-
-    eval_dataset = TedDBParams(config_args.val_data_path[0],
-                               n_poses=config_args.n_poses,
-                               subdivision_stride=config_args.subdivision_stride,
-                               pose_resampling_fps=config_args.motion_resampling_framerate,
-                               mean_dir_vec=mean_dir_vec,
-                               mean_pose=config_args.mean_pose,
-                               remove_word_timing=(config_args.input_context == 'text')
-                               )
-
-    test_dataset = TedDBParams(config_args.test_data_path[0],
-                               n_poses=config_args.n_poses,
-                               subdivision_stride=config_args.subdivision_stride,
-                               pose_resampling_fps=config_args.motion_resampling_framerate,
-                               mean_dir_vec=mean_dir_vec,
-                               mean_pose=config_args.mean_pose)
-
-    # build vocab
-    vocab_cache_path = j(os.path.split(config_args.train_data_path[0])[0],
-                         'vocab_models_s2eg',
-                         'vocab_cache.pkl')
-    lang_model = build_vocab('words', [train_dataset, eval_dataset, test_dataset],
-                             vocab_cache_path, config_args.wordembed_path,
-                             config_args.wordembed_dim)
-    train_dataset.set_lang_model(lang_model)
-    eval_dataset.set_lang_model(lang_model)
 
     return train_dataset, eval_dataset, test_dataset,\
         train_data_wav, eval_data_wav, test_data_wav,\

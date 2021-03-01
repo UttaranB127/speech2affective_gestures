@@ -155,6 +155,7 @@ class Processor(object):
                                             n_words=lang_model.n_words,
                                             word_embed_size=self.config_args.wordembed_dim,
                                             word_embeddings=lang_model.word_embedding_weights,
+                                            labels_size=self.EC,
                                             z_obj=self.train_speaker_model,
                                             pose_dim=self.P)
         self.s2eg_discriminator = ConvDiscriminator(self.P)
@@ -323,7 +324,7 @@ class Processor(object):
                     vid_name = sample[-1]['vid']
                     clip_start = str(sample[-1]['start_time'])
                     clip_end = str(sample[-1]['end_time'])
-                    batch_data_s2eg[i] = data_s2eg_np[k]
+                    batch_data_s2eg[i] = torch.from_numpy(data_s2eg_np[k])
 
                 def extend_word_seq(lang, words, end_time=None):
                     n_frames = data_s2eg.n_poses
@@ -424,21 +425,25 @@ class Processor(object):
 
         return batch_data, batch_labels_cat
 
-    def forward_pass_ser(self, data, labels_gt):
+    def forward_pass_ser(self, data, labels_gt=None):
         self.ser_optimizer.zero_grad()
         with torch.autograd.detect_anomaly():
             labels_pred = self.ser_model(data)
             # labels_pred_np = labels_pred.detach().cpu().numpy()
             # labels_gt_np = labels_gt.detach().cpu().numpy()
-            total_loss = self.pred_loss_func(labels_pred, labels_gt)
-        return total_loss, torch.argmax(labels_pred, dim=-1)
+            total_loss = None if labels_gt is None else self.pred_loss_func(labels_pred, labels_gt)
+            max_idx = torch.argmax(labels_pred, -1, keepdim=True)
+            labels_one_hot = torch.FloatTensor(labels_pred.shape).cuda()
+            labels_one_hot.zero_()
+            labels_one_hot.scatter_(1, max_idx, 1)
+        return total_loss, torch.argmax(labels_pred, dim=-1), labels_one_hot
 
     @staticmethod
     def add_noise(data):
         noise = torch.randn_like(data) * 0.1
         return data + noise
 
-    def forward_pass_s2eg(self, in_text, in_audio, target_poses, vid_indices, train):
+    def forward_pass_s2eg(self, in_text, in_audio, in_emo_labels, target_poses, vid_indices, train):
         warm_up_epochs = self.config_args.loss_warmup
         use_noisy_target = False
 
@@ -475,7 +480,7 @@ class Processor(object):
         self.s2eg_gen_optimizer.zero_grad()
 
         # decoding
-        out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
+        out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_audio, in_emo_labels, vid_indices)
 
         # loss
         beta = 0.1
@@ -493,7 +498,8 @@ class Processor(object):
             else:
                 rand_vids = None
 
-            out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_audio, rand_vids)
+            out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_audio,
+                                                                         in_emo_labels, rand_vids)
             beta = 0.05
             pose_l1 = F.smooth_l1_loss(out_dir_vec / beta, out_dir_vec_rand_vid.detach() / beta,
                                        reduction='none') * beta
@@ -551,7 +557,8 @@ class Processor(object):
                 pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=True):
             if self.args.train_ser:
                 self.ser_model.train()
-                ser_loss, train_labels_pred = self.forward_pass_ser(train_data_wav, train_labels_cat)
+                ser_loss, train_labels_pred, train_labels_oh = self.forward_pass_ser(train_data_wav,
+                                                                                     train_labels_cat)
                 ser_loss.backward()
                 # nn.utils.clip_grad_norm_(self.ser_model.parameters(), self.args.gradient_clip)
                 self.ser_optimizer.step()
@@ -568,12 +575,14 @@ class Processor(object):
             else:
                 self.ser_model.eval()
                 with torch.no_grad():
-                    ser_loss, train_labels_pred = self.forward_pass_ser(train_data_wav, train_labels_cat)
+                    _, train_labels_pred, train_labels_oh = self.forward_pass_ser(train_data_wav,
+                                                                                  train_labels_cat)
 
             if self.args.train_s2eg:
                 self.s2eg_generator.train()
                 self.s2eg_discriminator.train()
-                ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, vec_seq, vid_indices, train=True)
+                ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, train_labels_oh,
+                                                  vec_seq, vid_indices, train=True)
                 # Compute statistics
                 batch_s2eg_loss += ret_dict['total_loss']
 
@@ -612,7 +621,8 @@ class Processor(object):
                 pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=False):
             self.ser_model.eval()
             with torch.no_grad():
-                ser_loss, eval_labels_pred = self.forward_pass_ser(eval_data_wav, eval_labels_cat)
+                ser_loss, eval_labels_pred, eval_labels_oh = self.forward_pass_ser(eval_data_wav,
+                                                                                   eval_labels_cat)
                 eval_accu = torch.sum((eval_labels_cat - eval_labels_pred) == 0) / len(eval_labels_pred)
 
                 if self.args.train_ser:
@@ -629,7 +639,8 @@ class Processor(object):
                 self.s2eg_generator.eval()
                 self.s2eg_discriminator.eval()
                 with torch.no_grad():
-                    ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, vec_seq, vid_indices, train=False)
+                    ret_dict = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
+                                                      vec_seq, vid_indices, train=False)
                     # Compute statistics
                     batch_s2eg_loss += ret_dict['total_loss']
 

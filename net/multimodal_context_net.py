@@ -63,12 +63,13 @@ class TextEncoderTCN(nn.Module):
 
 
 class PoseGenerator(nn.Module):
-    def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings, z_obj=None):
+    def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings, labels_size, z_obj=None):
         super().__init__()
         self.pre_length = args.n_pre_poses
         self.gen_length = args.n_poses - args.n_pre_poses
         self.z_obj = z_obj
         self.input_context = args.input_context
+        self.labels_size = labels_size
 
         if self.input_context == 'both':
             self.in_size = 32 + 32 + pose_dim + 1  # audio_feat + text_feat + last pose + constraint bit
@@ -84,7 +85,7 @@ class PoseGenerator(nn.Module):
         self.speaker_embedding = None
         if self.z_obj:
             self.z_size = 16
-            self.in_size += self.z_size
+            self.in_size += (self.z_size + self.labels_size)
             if self.z_obj.__class__.__name__ == 'Vocab':
                 self.speaker_embedding = nn.Sequential(
                     nn.Embedding(z_obj.n_words, self.z_size),
@@ -114,7 +115,7 @@ class PoseGenerator(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def forward(self, pre_seq, in_text, in_audio, vid_indices=None):
+    def forward(self, pre_seq, in_text, in_audio, in_emo_labels, vid_indices=None):
         decoder_hidden = None
         if self.do_flatten_parameters:
             self.gru.flatten_parameters()
@@ -142,6 +143,9 @@ class PoseGenerator(nn.Module):
         else:
             z_mu = z_log_var = None
             z_context = None
+
+        # emotion
+        z_context = torch.cat((z_context, in_emo_labels), dim=-1)
 
         if self.input_context == 'both':
             in_data = torch.cat((pre_seq, audio_feat_seq, text_feat_seq), dim=2)

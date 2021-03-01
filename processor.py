@@ -168,10 +168,15 @@ class Processor(object):
         self.s2eg_generator.to(torch.cuda.current_device())
         self.s2eg_discriminator.to(torch.cuda.current_device())
         self.conv2_weights = []
-        print('Total training data:\t\t{}'.format(len(self.data_loader['train_data_ser'])))
-        print('Total evaluation data:\t\t{}'.format(len(self.data_loader['eval_data_ser'])))
-        print('Total testing data:\t\t\t{}'.format(len(self.data_loader['test_data_ser'])))
-        print('Training with batch size:\t{}'.format(self.args.batch_size))
+        print('Total ser training data:\t\t{}'.format(len(self.data_loader['train_data_ser'])))
+        print('Total ser evaluation data:\t\t{}'.format(len(self.data_loader['eval_data_ser'])))
+        print('Total ser testing data:\t\t\t{}'.format(len(self.data_loader['test_data_ser'])))
+        print('Training ser with batch size:\t{}'.format(self.args.batch_size))
+
+        print('Total s2eg training data:\t\t{}'.format(len(self.data_loader['train_data_s2eg_wav'])))
+        print('Total s2eg evaluation data:\t\t{}'.format(len(self.data_loader['eval_data_s2eg_wav'])))
+        print('Total s2eg testing data:\t\t\t{}'.format(len(self.data_loader['test_data_s2eg_wav'])))
+        print('Training s2eg with batch size:\t{}'.format(self.args.batch_size))
 
         # ser optimizer
         if self.args.ser_optimizer == 'SGD':
@@ -292,13 +297,11 @@ class Processor(object):
         if train:
             data_ser_np = self.data_loader['train_data_ser']
             data_s2eg_np = self.data_loader['train_data_s2eg_wav']
-            data_s2eg_dict = self.data_loader['train_data_s2eg_wav_dict']
             data_s2eg = self.data_loader['train_data_s2eg']
             labels_np = self.data_loader['train_labels_cat']
         else:
             data_ser_np = self.data_loader['eval_data_ser']
             data_s2eg_np = self.data_loader['eval_data_s2eg_wav']
-            data_s2eg_dict = self.data_loader['eval_data_s2eg_wav_dict']
             data_s2eg = self.data_loader['eval_data_s2eg']
             labels_np = self.data_loader['eval_labels_cat']
 
@@ -320,7 +323,7 @@ class Processor(object):
                     vid_name = sample[-1]['vid']
                     clip_start = str(sample[-1]['start_time'])
                     clip_end = str(sample[-1]['end_time'])
-                    batch_data_s2eg[i] = data_s2eg_np[data_s2eg_dict[vid_name][clip_start + '_' + clip_end]]
+                    batch_data_s2eg[i] = data_s2eg_np[k]
 
                 def extend_word_seq(lang, words, end_time=None):
                     n_frames = data_s2eg.n_poses

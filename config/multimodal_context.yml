@@ -1,8 +1,8 @@
 name: multimodal_context
 
 train_data_path: ../../data/ted_db/lmdb_train
-val_data_path: ../../data/ted_db/lmdb_val
-test_data_path: ../../data/ted_db/lmdb_test
+val_data_path: ../../data/ted_db/lmdb_train
+test_data_path: ../../data/ted_db/lmdb_train
 
 wordembed_dim: 300
 wordembed_path: ../../data/fasttext/crawl-300d-2M-subword.bin

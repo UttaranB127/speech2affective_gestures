@@ -44,7 +44,7 @@ parser.add_argument('--dataset-s2eg', type=str, default='ted_db', metavar='D-S2G
 parser.add_argument('-dap', '--dataset-s2eg-already-processed',
                     help='Optional. Set to True if dataset has already been processed.' +
                          'If not, or if you are not sure, set it to False.',
-                    type=str2bool, default=False)
+                    type=str2bool, default=True)
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
@@ -125,11 +125,11 @@ config_args = parse_args()
 
 train_data_ted, eval_data_ted, test_data_ted,\
     train_data_ted_wav, eval_data_ted_wav, test_data_ted_wav,\
-    train_ted_wav_dict, eval_ted_wav_dict, test_ted_wav_dict,\
     ted_wav_max_all, ted_wav_min_all, = loader.load_ted_db_data(data_path,
                                                                 args.dataset_s2eg,
                                                                 config_args,
                                                                 args.dataset_s2eg_already_processed)
+    # train_ted_wav_dict, eval_ted_wav_dict, test_ted_wav_dict,\
 pose_dim = 27  # 9 x 3
 
 train_data_wav, eval_data_wav, test_data_wav, \
@@ -147,13 +147,13 @@ os.makedirs(args.work_dir_ser, exist_ok=True)
 os.makedirs(args.work_dir_s2eg, exist_ok=True)
 
 data_loader = dict(train_data_ser=train_data_wav, train_data_s2eg=train_data_ted,
-                   train_data_s2eg_wav=train_data_ted_wav, train_data_s2eg_wav_dict=train_ted_wav_dict,
+                   train_data_s2eg_wav=train_data_ted_wav,  # train_data_s2eg_wav_dict=train_ted_wav_dict,
                    train_labels_cat=train_labels_cat, train_labels_dim=train_labels_dim,
                    eval_data_ser=eval_data_wav, eval_data_s2eg=eval_data_ted,
-                   eval_data_s2eg_wav=eval_data_ted_wav, eval_data_s2eg_wav_dict=eval_ted_wav_dict,
+                   eval_data_s2eg_wav=eval_data_ted_wav,  # eval_data_s2eg_wav_dict=eval_ted_wav_dict,
                    eval_labels_cat=eval_labels_cat, eval_labels_dim=eval_labels_dim,
                    test_data_ser=test_data_wav, test_data_s2eg=test_data_ted,
-                   test_data_s2eg_wav=test_data_ted_wav, test_data_s2eg_wav_dict=test_ted_wav_dict,
+                   test_data_s2eg_wav=test_data_ted_wav,  # test_data_s2eg_wav_dict=test_ted_wav_dict,
                    test_labels_cat=test_labels_cat, test_labels_dim=test_labels_dim, )
 
 pr = processor.Processor(args, config_args, data_path, data_loader,

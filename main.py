@@ -52,7 +52,7 @@ parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
                     help='perform data augmentation by mirroring all the sequences (default: False)')
 parser.add_argument('--train-ser', type=bool, default=True, metavar='T-SER',
                     help='train the ser model (default: True)')
-parser.add_argument('--emo-as-cats', type=bool, default=False, metavar='EAC',
+parser.add_argument('--emo-as-cats', type=bool, default=True, metavar='EAC',
                     help='consider emotions as categories (True) or dimensions (False) (default: False)')
 parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')

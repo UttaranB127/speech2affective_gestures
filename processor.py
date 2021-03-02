@@ -33,11 +33,11 @@ def find_all_substr(a_str, sub):
         start += len(sub)  # use start += 1 to find overlapping matches
 
 
-def get_epoch_and_loss(path_to_model_files, phase, epoch='best'):
+def get_epoch_and_loss(path_to_model_files, phase, emo_as_cats, epoch='best'):
     all_models = os.listdir(path_to_model_files)
     if len(all_models) < 2:
         if phase == 'ser':
-            return '', None, 0., np.inf
+            return '', None, 0. if emo_as_cats else -np.inf, np.inf
         if phase == 's2eg':
             return '', None, np.inf
     if epoch == 'best':
@@ -69,7 +69,7 @@ def get_epoch_and_loss(path_to_model_files, phase, epoch='best'):
             break
     if found_model is None:
         if phase == 'ser':
-            return '', None, 0., np.inf
+            return '', None, 0. if emo_as_cats else -np.inf, np.inf
         if phase == 'se2g':
             return '', None, np.inf
     all_underscores = list(find_all_substr(found_model, '_'))
@@ -230,11 +230,11 @@ class Processor(object):
         model_name = None
         if phase == 'ser':
             model_name, self.best_ser_accu_epoch, \
-                self.best_ser_accu, self.best_ser_accu_loss = get_epoch_and_loss(work_dir,
-                                                                                 'ser', epoch=epoch)
+                self.best_ser_accu, self.best_ser_accu_loss =\
+                get_epoch_and_loss(work_dir, 'ser', emo_as_cats=self.args.emo_as_cats, epoch=epoch)
         elif phase == 's2eg':
-            model_name, self.best_s2eg_loss_epoch, self.best_s2eg_loss = get_epoch_and_loss(work_dir,
-                                                                                            's2eg', epoch=epoch)
+            model_name, self.best_s2eg_loss_epoch, self.best_s2eg_loss =\
+                get_epoch_and_loss(work_dir, 's2eg', emo_as_cats=self.args.emo_as_cats, epoch=epoch)
         model_found = False
         try:
             loaded_vars = torch.load(j(work_dir, model_name))
@@ -451,11 +451,13 @@ class Processor(object):
     def forward_pass_ser(self, data, labels_gt=None):
         self.ser_optimizer.zero_grad()
         with torch.autograd.detect_anomaly():
-            labels_pred = self.ser_model(data)
+            labels_pred_raw = self.ser_model(data)
             # labels_pred_np = labels_pred.detach().cpu().numpy()
             # labels_gt_np = labels_gt.detach().cpu().numpy()
-            if not self.args.emo_as_cats:
-                labels_pred = torch.sigmoid(labels_pred)
+            if self.args.emo_as_cats:
+                labels_pred = labels_pred_raw
+            else:
+                labels_pred = torch.sigmoid(labels_pred_raw)
             total_loss = None if labels_gt is None else self.pred_loss_func(labels_pred, labels_gt)
             max_idx = torch.argmax(labels_pred, -1, keepdim=True)
             labels_one_hot = torch.FloatTensor(labels_pred.shape).cuda()

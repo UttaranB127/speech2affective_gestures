@@ -111,9 +111,9 @@ class AttConvRNN(nn.Module):
         x_06 = self.leaky_relu(self.conv5(x_05))
         x_07 = self.leaky_relu(self.conv6(x_06)).permute(0, 2, 1, 3)
         x_08 = self.leaky_relu(self.linear1(x_07.contiguous().view(x_07.shape[0], x_07.shape[1], -1)))
-        # x_09, _ = self.gru(x_08)
-        # x_10, alphas = self.attention(x_09)
-        x_10, alphas = self.attention(x_08)
+        x_09, _ = self.gru(x_08)
+        x_10, alphas = self.attention(x_09)
+        # x_10, alphas = self.attention(x_08)
         x_11 = self.leaky_relu(self.linear2(x_10))
         x_12 = self.linear3(x_11)
 

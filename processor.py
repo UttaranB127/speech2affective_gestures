@@ -118,6 +118,7 @@ class Processor(object):
         self.EC = EC
         self.ED = ED
         self.P = P
+        self.num_labels = self.EC if self.args.emo_as_cats else self.ED
 
         self.L1 = 128
         self.L2 = 256
@@ -130,8 +131,8 @@ class Processor(object):
         self.bidirectional = False
         self.dropout_keep_prob = 1.
 
-        self.pred_loss_func = nn.CrossEntropyLoss()
-        self.best_ser_accu = 0.
+        self.pred_loss_func = nn.CrossEntropyLoss() if self.args.emo_as_cats else nn.SmoothL1Loss()
+        self.best_ser_accu = 0. if self.args.emo_as_cats else -np.inf
         self.ser_accu_updated = False
         self.ser_step_epochs = [math.ceil(float(self.args.ser_num_epoch * x)) for x in self.args.step]
         self.best_ser_accu_epoch = None
@@ -141,43 +142,53 @@ class Processor(object):
         self.s2eg_loss_updated = False
         self.min_train_epochs = min_train_epochs
         self.zfill = zfill
-        self.ser_model = AttConvRNN(C=self.C, H=self.H, W=self.W, EC=self.EC,
+        self.ser_model = AttConvRNN(C=self.C, H=self.H, W=self.W, EC=self.num_labels,
                                     L1=self.L1, L2=self.L2, gru_cell_units=self.gru_cell_units,
                                     attention_size=self.attention_size, num_linear=self.num_linear,
                                     pool_stride_height=self.pool_stride_height,
                                     pool_stride_width=self.pool_stride_width,
                                     F1=self.F1, bidirectional=self.bidirectional,
                                     dropout_keep_prob=self.dropout_keep_prob)
-        lang_model = self.data_loader['train_data_s2eg'].lang_model
-        self.train_speaker_model = self.data_loader['train_data_s2eg'].speaker_model
-        self.eval_speaker_model = self.data_loader['eval_data_s2eg'].speaker_model
-        self.s2eg_generator = PoseGenerator(self.config_args,
-                                            n_words=lang_model.n_words,
-                                            word_embed_size=self.config_args.wordembed_dim,
-                                            word_embeddings=lang_model.word_embedding_weights,
-                                            labels_size=self.EC,
-                                            z_obj=self.train_speaker_model,
-                                            pose_dim=self.P)
-        self.s2eg_discriminator = ConvDiscriminator(self.P)
+        if self.args.train_s2eg:
+            lang_model = self.data_loader['train_data_s2eg'].lang_model
+            self.train_speaker_model = self.data_loader['train_data_s2eg'].speaker_model
+            self.eval_speaker_model = self.data_loader['eval_data_s2eg'].speaker_model
+            self.s2eg_generator = PoseGenerator(self.config_args,
+                                                n_words=lang_model.n_words,
+                                                word_embed_size=self.config_args.wordembed_dim,
+                                                word_embeddings=lang_model.word_embedding_weights,
+                                                labels_size=self.num_labels,
+                                                z_obj=self.train_speaker_model,
+                                                pose_dim=self.P)
+            self.s2eg_discriminator = ConvDiscriminator(self.P)
+        else:
+            lang_model, self.train_speaker_model,\
+                self.eval_speaker_model, self.s2eg_generator,\
+                self.s2eg_discriminator = [None] * 5
 
         if self.args.use_multiple_gpus and torch.cuda.device_count() > 1:
             self.args.batch_size *= torch.cuda.device_count()
             self.ser_model = nn.DataParallel(self.ser_model)
-            self.s2eg_generator = nn.DataParallel(self.s2eg_generator)
-            self.s2eg_discriminator = nn.DataParallel(self.s2eg_discriminator)
+            if self.args.train_s2eg:
+                self.s2eg_generator = nn.DataParallel(self.s2eg_generator)
+                self.s2eg_discriminator = nn.DataParallel(self.s2eg_discriminator)
         self.ser_model.to(torch.cuda.current_device())
-        self.s2eg_generator.to(torch.cuda.current_device())
-        self.s2eg_discriminator.to(torch.cuda.current_device())
+        if self.args.train_s2eg:
+            self.s2eg_generator.to(torch.cuda.current_device())
+            self.s2eg_discriminator.to(torch.cuda.current_device())
         self.conv2_weights = []
-        print('Total ser training data:\t\t{}'.format(len(self.data_loader['train_data_ser'])))
-        print('Total ser evaluation data:\t\t{}'.format(len(self.data_loader['eval_data_ser'])))
-        print('Total ser testing data:\t\t\t{}'.format(len(self.data_loader['test_data_ser'])))
-        print('Training ser with batch size:\t{}'.format(self.args.batch_size))
 
-        print('Total s2eg training data:\t\t{}'.format(len(self.data_loader['train_data_s2eg_wav'])))
-        print('Total s2eg evaluation data:\t\t{}'.format(len(self.data_loader['eval_data_s2eg_wav'])))
-        print('Total s2eg testing data:\t\t\t{}'.format(len(self.data_loader['test_data_s2eg_wav'])))
-        print('Training s2eg with batch size:\t{}'.format(self.args.batch_size))
+        if self.args.train_ser:
+            print('Total ser training data:\t\t{}'.format(len(self.data_loader['train_data_ser'])))
+            print('Total ser evaluation data:\t\t{}'.format(len(self.data_loader['eval_data_ser'])))
+            print('Total ser testing data:\t\t\t{}'.format(len(self.data_loader['test_data_ser'])))
+            print('Training ser with batch size:\t{}'.format(self.args.batch_size))
+
+        if self.args.train_s2eg:
+            print('Total s2eg training data:\t\t{}'.format(len(self.data_loader['train_data_s2eg_wav'])))
+            print('Total s2eg evaluation data:\t\t{}'.format(len(self.data_loader['eval_data_s2eg_wav'])))
+            print('Total s2eg testing data:\t\t\t{}'.format(len(self.data_loader['test_data_s2eg_wav'])))
+            print('Training s2eg with batch size:\t{}'.format(self.args.batch_size))
 
         # ser optimizer
         if self.args.ser_optimizer == 'SGD':
@@ -197,12 +208,13 @@ class Processor(object):
         self.lr = self.args.base_lr
 
         # s2eg optimizers
-        self.s2eg_gen_optimizer = optim.Adam(self.s2eg_generator.parameters(),
-                                             lr=self.config_args.learning_rate, betas=(0.5, 0.999))
-        self.s2eg_dis_optimizer = torch.optim.Adam(
-            self.s2eg_discriminator.parameters(),
-            lr=self.config_args.learning_rate * self.config_args.discriminator_lr_weight,
-            betas=(0.5, 0.999))
+        if self.args.train_s2eg:
+            self.s2eg_gen_optimizer = optim.Adam(self.s2eg_generator.parameters(),
+                                                 lr=self.config_args.learning_rate, betas=(0.5, 0.999))
+            self.s2eg_dis_optimizer = torch.optim.Adam(
+                self.s2eg_discriminator.parameters(),
+                lr=self.config_args.learning_rate * self.config_args.discriminator_lr_weight,
+                betas=(0.5, 0.999))
 
     def process_data(self, data, poses, quat, trans, affs):
         data = data.float().cuda()
@@ -286,6 +298,7 @@ class Processor(object):
         batch_data_ser = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).cuda()
         batch_data_s2eg = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).cuda()
         batch_labels_cat = torch.zeros(self.args.batch_size).long().cuda()
+        batch_labels_dim = torch.zeros((self.args.batch_size, self.ED)).float().cuda()
         batch_word_seq_tensor = torch.zeros((self.args.batch_size, 34)).long().cuda()
         batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().cuda()
         batch_extended_word_seq = torch.zeros((self.args.batch_size, 34)).long().cuda()
@@ -299,111 +312,119 @@ class Processor(object):
             data_ser_np = self.data_loader['train_data_ser']
             data_s2eg_np = self.data_loader['train_data_s2eg_wav']
             data_s2eg = self.data_loader['train_data_s2eg']
-            labels_np = self.data_loader['train_labels_cat']
+            labels_cat_np = self.data_loader['train_labels_cat']
+            labels_dim_np = self.data_loader['train_labels_dim']
         else:
             data_ser_np = self.data_loader['eval_data_ser']
             data_s2eg_np = self.data_loader['eval_data_s2eg_wav']
             data_s2eg = self.data_loader['eval_data_s2eg']
-            labels_np = self.data_loader['eval_labels_cat']
+            labels_cat_np = self.data_loader['eval_labels_cat']
+            labels_dim_np = self.data_loader['eval_labels_dim']
 
         num_data = len(data_ser_np)
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
         prob_dist = np.ones(num_data) / float(num_data)
 
+        def extend_word_seq(lang, words, end_time=None):
+            n_frames = data_s2eg.n_poses
+            if end_time is None:
+                end_time = aux_info['end_time']
+            frame_duration = (end_time - aux_info['start_time']) / n_frames
+
+            extended_word_indices = np.zeros(n_frames)  # zero is the index of padding token
+            if data_s2eg.remove_word_timing:
+                n_words = 0
+                for word in words:
+                    idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
+                    if idx < n_frames:
+                        n_words += 1
+                space = int(n_frames / (n_words + 1))
+                for word_idx in range(n_words):
+                    idx = (word_idx + 1) * space
+                    extended_word_indices[idx] = lang.get_word_index(words[word_idx][0])
+            else:
+                prev_idx = 0
+                for word in words:
+                    idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
+                    if idx < n_frames:
+                        extended_word_indices[idx] = lang.get_word_index(word[0])
+                        # extended_word_indices[prev_idx:idx+1] = lang.get_word_index(word[0])
+                        prev_idx = idx
+            return torch.Tensor(extended_word_indices).long()
+
+        def words_to_tensor(lang, words, end_time=None):
+            indexes = [lang.SOS_token]
+            for word in words:
+                if end_time is not None and word[1] > end_time:
+                    break
+                indexes.append(lang.get_word_index(word[0]))
+            indexes.append(lang.EOS_token)
+            return torch.Tensor(indexes).long()
+
         for p in range(pseudo_passes):
             rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
             for i, k in enumerate(rand_keys):
                 batch_data_ser[i] = torch.from_numpy(data_ser_np[k])
-                batch_labels_cat[i] = torch.from_numpy(np.where(labels_np[k])[0])
-                with data_s2eg.lmdb_env.begin(write=False) as txn:
-                    key = '{:010}'.format(k).encode('ascii')
-                    sample = txn.get(key)
-                    sample = pyarrow.deserialize(sample)
-                    word_seq, pose_seq, vec_seq, audio, spectrogram, aux_info = sample
+                batch_labels_cat[i] = torch.from_numpy(np.where(labels_cat_np[k])[0])
+                batch_labels_dim[i] = torch.from_numpy(labels_dim_np[k])
 
-                    vid_name = sample[-1]['vid']
-                    clip_start = str(sample[-1]['start_time'])
-                    clip_end = str(sample[-1]['end_time'])
-                    batch_data_s2eg[i] = torch.from_numpy(data_s2eg_np[k])
+                if self.args.train_s2eg:
+                    with data_s2eg.lmdb_env.begin(write=False) as txn:
+                        key = '{:010}'.format(k).encode('ascii')
+                        sample = txn.get(key)
+                        sample = pyarrow.deserialize(sample)
+                        word_seq, pose_seq, vec_seq, audio, spectrogram, aux_info = sample
 
-                def extend_word_seq(lang, words, end_time=None):
-                    n_frames = data_s2eg.n_poses
-                    if end_time is None:
-                        end_time = aux_info['end_time']
-                    frame_duration = (end_time - aux_info['start_time']) / n_frames
+                        # vid_name = sample[-1]['vid']
+                        # clip_start = str(sample[-1]['start_time'])
+                        # clip_end = str(sample[-1]['end_time'])
+                        batch_data_s2eg[i] = torch.from_numpy(data_s2eg_np[k])
 
-                    extended_word_indices = np.zeros(n_frames)  # zero is the index of padding token
-                    if data_s2eg.remove_word_timing:
-                        n_words = 0
-                        for word in words:
-                            idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
-                            if idx < n_frames:
-                                n_words += 1
-                        space = int(n_frames / (n_words + 1))
-                        for i in range(n_words):
-                            idx = (i + 1) * space
-                            extended_word_indices[idx] = lang.get_word_index(words[i][0])
+                    duration = aux_info['end_time'] - aux_info['start_time']
+                    do_clipping = True
+
+                    if do_clipping:
+                        sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
+                        audio = make_audio_fixed_length(audio, data_s2eg.expected_audio_length)
+                        spectrogram = spectrogram[:, 0:data_s2eg.expected_spectrogram_length]
+                        vec_seq = vec_seq[0:data_s2eg.n_poses]
+                        pose_seq = pose_seq[0:data_s2eg.n_poses]
                     else:
-                        prev_idx = 0
-                        for word in words:
-                            idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
-                            if idx < n_frames:
-                                extended_word_indices[idx] = lang.get_word_index(word[0])
-                                # extended_word_indices[prev_idx:idx+1] = lang.get_word_index(word[0])
-                                prev_idx = idx
-                    return torch.Tensor(extended_word_indices).long()
+                        sample_end_time = None
 
-                def words_to_tensor(lang, words, end_time=None):
-                    indexes = [lang.SOS_token]
-                    for word in words:
-                        if end_time is not None and word[1] > end_time:
-                            break
-                        indexes.append(lang.get_word_index(word[0]))
-                    indexes.append(lang.EOS_token)
-                    return torch.Tensor(indexes).long()
+                    # to tensors
+                    word_seq_tensor = words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
+                    extended_word_seq = extend_word_seq(data_s2eg.lang_model, word_seq, sample_end_time)
+                    vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
+                    pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
+                    audio = torch.from_numpy(audio).float()
+                    spectrogram = torch.from_numpy(spectrogram)
 
-                duration = aux_info['end_time'] - aux_info['start_time']
-                do_clipping = True
+                    batch_word_seq_tensor[i, :len(word_seq_tensor)] = word_seq_tensor
+                    batch_word_seq_lengths[i] = len(word_seq_tensor)
+                    batch_extended_word_seq[i] = extended_word_seq
+                    batch_pose_seq[i] = pose_seq
+                    batch_vec_seq[i] = vec_seq
+                    batch_audio[i] = audio
+                    batch_spectrogram[i] = spectrogram
+                    # speaker input
+                    if train:
+                        if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
+                            batch_vid_indices[i] =\
+                                torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
+                    else:
+                        if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
+                            batch_vid_indices[i] =\
+                                torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
 
-                if do_clipping:
-                    sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
-                    audio = make_audio_fixed_length(audio, data_s2eg.expected_audio_length)
-                    spectrogram = spectrogram[:, 0:data_s2eg.expected_spectrogram_length]
-                    vec_seq = vec_seq[0:data_s2eg.n_poses]
-                    pose_seq = pose_seq[0:data_s2eg.n_poses]
-                else:
-                    sample_end_time = None
-
-                # to tensors
-                word_seq_tensor = words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-                extended_word_seq = extend_word_seq(data_s2eg.lang_model, word_seq, sample_end_time)
-                vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
-                pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
-                audio = torch.from_numpy(audio).float()
-                spectrogram = torch.from_numpy(spectrogram)
-
-                batch_word_seq_tensor[i, :len(word_seq_tensor)] = word_seq_tensor
-                batch_word_seq_lengths[i] = len(word_seq_tensor)
-                batch_extended_word_seq[i] = extended_word_seq
-                batch_pose_seq[i] = pose_seq
-                batch_vec_seq[i] = vec_seq
-                batch_audio[i] = audio
-                batch_spectrogram[i] = spectrogram
-                # speaker input
-                if train:
-                    if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
-                        batch_vid_indices[i] = torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
-                else:
-                    if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
-                        batch_vid_indices[i] = torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
-
-            yield batch_data_ser, batch_labels_cat,\
+            yield batch_data_ser, batch_labels_cat, batch_labels_dim,\
                 batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq,\
                 batch_pose_seq, batch_vec_seq, batch_audio, batch_spectrogram, batch_vid_indices
 
     def return_batch(self, batch_size, dataset, randomized=True):
         data_np = dataset['data']
-        labels_np = dataset['labels_cat']
+        labels_cat_np = dataset['labels_cat']
+        labels_dim_np = dataset['labels_dim']
         if len(batch_size) > 1:
             rand_keys = np.copy(batch_size)
             batch_size = len(batch_size)
@@ -418,12 +439,14 @@ class Processor(object):
 
         batch_data = torch.zeros((batch_size, self.C, self.H, self.W)).cuda()
         batch_labels_cat = torch.zeros(batch_size).long().cuda()
+        batch_labels_dim = torch.zeros((batch_size, self.ED)).float().cuda()
 
         for i, k in enumerate(rand_keys):
             batch_data[i] = torch.from_numpy(data_np[k])
-            batch_labels_cat[i] = torch.from_numpy(np.where(labels_np[k])[0])
+            batch_labels_cat[i] = torch.from_numpy(np.where(labels_cat_np[k])[0])
+            batch_labels_dim[i] = torch.from_numpy(labels_dim_np[k])
 
-        return batch_data, batch_labels_cat
+        return batch_data, batch_labels_cat, batch_labels_dim
 
     def forward_pass_ser(self, data, labels_gt=None):
         self.ser_optimizer.zero_grad()
@@ -431,6 +454,8 @@ class Processor(object):
             labels_pred = self.ser_model(data)
             # labels_pred_np = labels_pred.detach().cpu().numpy()
             # labels_gt_np = labels_gt.detach().cpu().numpy()
+            if not self.args.emo_as_cats:
+                labels_pred = torch.sigmoid(labels_pred)
             total_loss = None if labels_gt is None else self.pred_loss_func(labels_pred, labels_gt)
             max_idx = torch.argmax(labels_pred, -1, keepdim=True)
             labels_one_hot = torch.FloatTensor(labels_pred.shape).cuda()
@@ -459,7 +484,7 @@ class Processor(object):
             self.s2eg_dis_optimizer.zero_grad()
 
             # out shape (batch x seq x dim)
-            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
+            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_audio, in_emo_labels, vid_indices)
 
             if use_noisy_target:
                 noise_target = Processor.add_noise(target_poses)
@@ -552,17 +577,21 @@ class Processor(object):
         batch_s2eg_loss = 0.
         num_batches = 0.
 
-        for train_data_wav, train_labels_cat,\
+        for train_data_wav, train_labels_cat, train_labels_dim,\
                 word_seq_tensor, word_seq_lengths, extended_word_seq,\
                 pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=True):
             if self.args.train_ser:
                 self.ser_model.train()
-                ser_loss, train_labels_pred, train_labels_oh = self.forward_pass_ser(train_data_wav,
-                                                                                     train_labels_cat)
+                ser_loss, train_labels_pred, train_labels_oh =\
+                    self.forward_pass_ser(train_data_wav,
+                                          train_labels_cat if self.args.emo_as_cats else train_labels_dim)
                 ser_loss.backward()
                 # nn.utils.clip_grad_norm_(self.ser_model.parameters(), self.args.gradient_clip)
                 self.ser_optimizer.step()
-                train_accu = torch.sum((train_labels_cat - train_labels_pred) == 0) / len(train_labels_pred)
+                if self.args.emo_as_cats:
+                    train_accu = torch.sum((train_labels_cat - train_labels_pred) == 0) / len(train_labels_pred)
+                else:
+                    train_accu = - ser_loss.clone()
 
                 # Compute statistics
                 batch_ser_loss += ser_loss.item()
@@ -616,14 +645,18 @@ class Processor(object):
         batch_s2eg_loss = 0.
         num_batches = 0.
 
-        for eval_data_wav, eval_labels_cat, \
+        for eval_data_wav, eval_labels_cat, eval_labels_dim,\
             word_seq_tensor, word_seq_lengths, extended_word_seq, \
                 pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=False):
             self.ser_model.eval()
             with torch.no_grad():
-                ser_loss, eval_labels_pred, eval_labels_oh = self.forward_pass_ser(eval_data_wav,
-                                                                                   eval_labels_cat)
-                eval_accu = torch.sum((eval_labels_cat - eval_labels_pred) == 0) / len(eval_labels_pred)
+                ser_loss, eval_labels_pred, eval_labels_oh =\
+                    self.forward_pass_ser(eval_data_wav,
+                                          eval_labels_cat if self.args.emo_as_cats else eval_labels_dim)
+                if self.args.emo_as_cats:
+                    eval_accu = torch.sum((eval_labels_cat - eval_labels_pred) == 0) / len(eval_labels_pred)
+                else:
+                    eval_accu = - ser_loss.clone()
 
                 if self.args.train_ser:
                     # Compute statistics
@@ -799,7 +832,7 @@ class Processor(object):
             quat_pred_np = quat_pred.detach().cpu().numpy()
             root_pos = torch.zeros(quat_pred.shape[0], quat_pred.shape[1], self.C).cuda()
             pos_pred = MocapDataset.forward_kinematics(quat_pred.contiguous().view(
-                quat_pred.shape[0], quat_pred.shape[1], -1, self.EC), root_pos, self.joint_parents,
+                quat_pred.shape[0], quat_pred.shape[1], -1, self.num_labels), root_pos, self.joint_parents,
                 torch.cat((root_pos[:, 0:1], joint_offsets), dim=1).unsqueeze(1))
 
         animation_pred = {

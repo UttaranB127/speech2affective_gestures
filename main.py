@@ -50,9 +50,11 @@ parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
 parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
                     help='perform data augmentation by mirroring all the sequences (default: False)')
-parser.add_argument('--train-ser', type=bool, default=False, metavar='T-SER',
+parser.add_argument('--train-ser', type=bool, default=True, metavar='T-SER',
                     help='train the ser model (default: True)')
-parser.add_argument('--train-s2eg', type=bool, default=True, metavar='T-S2EG',
+parser.add_argument('--emo-as-cats', type=bool, default=False, metavar='EAC',
+                    help='consider emotions as categories (True) or dimensions (False) (default: False)')
+parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')
 parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
@@ -64,11 +66,11 @@ parser.add_argument('--batch-size', type=int, default=16, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--ser-start-epoch', type=int, default=4135, metavar='SER-SE',
+parser.add_argument('--ser-start-epoch', type=int, default=0, metavar='SER-SE',
                     help='starting epoch of training of ser (default: 0)')
 parser.add_argument('--ser-num-epoch', type=int, default=5000, metavar='SER-NE',
                     help='number of epochs to train ser (default: 1000)')
-parser.add_argument('--s2eg-start-epoch', type=int, default=0, metavar='S2EG-SE',
+parser.add_argument('--s2eg-start-epoch', type=int, default=202, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
 parser.add_argument('--s2eg-num-epoch', type=int, default=5000, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')
@@ -123,25 +125,39 @@ randomized = False
 
 config_args = parse_args()
 
-train_data_ted, eval_data_ted, test_data_ted,\
-    train_data_ted_wav, eval_data_ted_wav, test_data_ted_wav,\
-    ted_wav_max_all, ted_wav_min_all, = loader.load_ted_db_data(data_path,
-                                                                args.dataset_s2eg,
-                                                                config_args,
-                                                                args.dataset_s2eg_already_processed)
+if args.train_s2eg:
+    train_data_ted, eval_data_ted, test_data_ted,\
+        train_data_ted_wav, eval_data_ted_wav, test_data_ted_wav,\
+        ted_wav_max_all, ted_wav_min_all = loader.load_ted_db_data(data_path,
+                                                                   args.dataset_s2eg,
+                                                                   config_args,
+                                                                   args.dataset_s2eg_already_processed)
     # train_ted_wav_dict, eval_ted_wav_dict, test_ted_wav_dict,\
-pose_dim = 27  # 9 x 3
+    pose_dim = 27  # 9 x 3
+else:
+    train_data_ted, eval_data_ted, test_data_ted, \
+        train_data_ted_wav, eval_data_ted_wav, test_data_ted_wav, \
+        ted_wav_max_all, ted_wav_min_all, pose_dim = [None] * 9
 
-train_data_wav, eval_data_wav, test_data_wav, \
-    train_labels_cat, eval_labels_cat, test_labels_cat, \
-    train_labels_dim, eval_labels_dim, test_labels_dim, \
-    means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
+if args.train_ser:
+    train_data_wav, eval_data_wav, test_data_wav, \
+        train_labels_cat, eval_labels_cat, test_labels_cat, \
+        train_labels_dim, eval_labels_dim, test_labels_dim, \
+        means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
+else:
+    train_data_wav, eval_data_wav, test_data_wav, \
+        train_labels_cat, eval_labels_cat, test_labels_cat, \
+        train_labels_dim, eval_labels_dim, test_labels_dim, \
+        means, stds = [None] * 11
 
 _, wav_channels, wav_height, wav_width = train_data_wav.shape
 num_emo_cats = train_labels_cat.shape[-1]
 num_emo_dims = train_labels_dim.shape[-1]
 
-args.work_dir_ser = j(models_ser_path, args.dataset_ser + '_{:02d}_cats'.format(num_emo_cats))
+if args.emo_as_cats:
+    args.work_dir_ser = j(models_ser_path, args.dataset_ser + '_{:02d}_cats'.format(num_emo_cats))
+else:
+    args.work_dir_ser = j(models_ser_path, args.dataset_ser + '_{:02d}_dims'.format(num_emo_dims))
 args.work_dir_s2eg = j(models_s2eg_path, args.dataset_s2eg)
 os.makedirs(args.work_dir_ser, exist_ok=True)
 os.makedirs(args.work_dir_s2eg, exist_ok=True)

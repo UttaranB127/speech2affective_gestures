@@ -132,7 +132,10 @@ class PoseGenerator(nn.Module):
         # z vector; speaker embedding or random noise
         if self.z_obj:
             if self.speaker_embedding:
-                assert vid_indices is not None
+                try:
+                    assert vid_indices is not None
+                except AssertionError:
+                    temp = 1
                 z_context = self.speaker_embedding(vid_indices)
                 z_mu = self.speaker_mu(z_context)
                 z_log_var = self.speaker_log_var(z_context)

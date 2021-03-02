@@ -120,14 +120,16 @@ class Processor(object):
         self.P = P
         self.num_labels = self.EC if self.args.emo_as_cats else self.ED
 
-        self.L1 = 128
-        self.L2 = 256
-        self.gru_cell_units = 128
+        self.L1 = 32
+        self.L2 = 64
+        self.L3 = 32
+        self.L4 = 16
+        self.gru_cell_units = 16
         self.attention_size = 1
-        self.num_linear = 128
         self.pool_stride_height = 2
         self.pool_stride_width = 4
-        self.F1 = 64
+        self.F1 = 16
+        self.F2 = 16
         self.bidirectional = True
         self.dropout_keep_prob = 1.
 
@@ -144,10 +146,10 @@ class Processor(object):
         self.zfill = zfill
         self.ser_model = AttConvRNN(C=self.C, H=self.H, W=self.W, EC=self.num_labels,
                                     L1=self.L1, L2=self.L2, gru_cell_units=self.gru_cell_units,
-                                    attention_size=self.attention_size, num_linear=self.num_linear,
+                                    attention_size=self.attention_size, F1=self.F1,
                                     pool_stride_height=self.pool_stride_height,
                                     pool_stride_width=self.pool_stride_width,
-                                    F1=self.F1, bidirectional=self.bidirectional,
+                                    F2=self.F2, bidirectional=self.bidirectional,
                                     dropout_keep_prob=self.dropout_keep_prob)
         if self.args.train_s2eg:
             lang_model = self.data_loader['train_data_s2eg'].lang_model
@@ -457,17 +459,19 @@ class Processor(object):
             if self.args.emo_as_cats:
                 labels_pred = labels_pred_raw
             else:
-                labels_pred = torch.sigmoid(labels_pred_raw)
+                # labels_pred = torch.sigmoid(labels_pred_raw)
+                labels_pred = labels_pred_raw
                 labels_pred_diff = labels_pred[1:] - labels_pred[:-1]
-            total_loss = None if labels_gt is None else (self.pred_loss_func(labels_pred, labels_gt) +
+            # total_loss = None if labels_gt is None else self.pred_loss_func(labels_pred, labels_gt)
+            total_loss = None if labels_gt is None else ((self.pred_loss_func(labels_pred, labels_gt) +
                                                          (0. if self.args.emo_as_cats else
                                                           self.pred_loss_func(labels_pred_diff,
-                                                                              labels_gt[1:] - labels_gt[:-1])))
+                                                                              labels_gt[1:] - labels_gt[:-1]))) * 1.)
             max_idx = torch.argmax(labels_pred, -1, keepdim=True)
             labels_one_hot = torch.FloatTensor(labels_pred.shape).cuda()
             labels_one_hot.zero_()
             labels_one_hot.scatter_(1, max_idx, 1)
-        return total_loss, torch.argmax(labels_pred, dim=-1), labels_one_hot
+        return total_loss, torch.argmax(labels_pred, dim=-1) if self.args.emo_as_cats else labels_pred, labels_one_hot
 
     @staticmethod
     def add_noise(data):
@@ -594,6 +598,8 @@ class Processor(object):
                 ser_loss.backward()
                 # nn.utils.clip_grad_norm_(self.ser_model.parameters(), self.args.gradient_clip)
                 self.ser_optimizer.step()
+                if torch.max(torch.abs(self.ser_model.linear3.weight.grad.data)) < 1e-10:
+                    stop = 1
                 if self.args.emo_as_cats:
                     train_accu = torch.sum((train_labels_cat - train_labels_pred) == 0) / len(train_labels_pred)
                 else:

@@ -123,15 +123,15 @@ class Processor(object):
         self.L1 = 128
         self.L2 = 256
         self.gru_cell_units = 128
-        self.attention_size = 5
+        self.attention_size = 1
         self.num_linear = 128
         self.pool_stride_height = 2
         self.pool_stride_width = 4
         self.F1 = 64
-        self.bidirectional = False
+        self.bidirectional = True
         self.dropout_keep_prob = 1.
 
-        self.pred_loss_func = nn.CrossEntropyLoss() if self.args.emo_as_cats else nn.SmoothL1Loss()
+        self.pred_loss_func = nn.CrossEntropyLoss() if self.args.emo_as_cats else nn.L1Loss()
         self.best_ser_accu = 0. if self.args.emo_as_cats else -np.inf
         self.ser_accu_updated = False
         self.ser_step_epochs = [math.ceil(float(self.args.ser_num_epoch * x)) for x in self.args.step]
@@ -458,7 +458,11 @@ class Processor(object):
                 labels_pred = labels_pred_raw
             else:
                 labels_pred = torch.sigmoid(labels_pred_raw)
-            total_loss = None if labels_gt is None else self.pred_loss_func(labels_pred, labels_gt)
+                labels_pred_diff = labels_pred[1:] - labels_pred[:-1]
+            total_loss = None if labels_gt is None else (self.pred_loss_func(labels_pred, labels_gt) +
+                                                         (0. if self.args.emo_as_cats else
+                                                          self.pred_loss_func(labels_pred_diff,
+                                                                              labels_gt[1:] - labels_gt[:-1])))
             max_idx = torch.argmax(labels_pred, -1, keepdim=True)
             labels_one_hot = torch.FloatTensor(labels_pred.shape).cuda()
             labels_one_hot.zero_()
@@ -747,7 +751,7 @@ class Processor(object):
                     self.io.print_log('Done.')
 
                 # save model and weights
-                if self.ser_accu_updated or epoch % self.args.save_interval == 0:
+                if self.ser_accu_updated or (epoch % self.args.save_interval == 0 and epoch > self.min_train_epochs):
                     torch.save({'ser_model_dict': self.ser_model.state_dict()},
                                j(self.args.work_dir_ser, 'epoch_{}_accu_{:.4f}_loss_{:.4f}_model.pth.tar'.
                                  format(epoch, self.epoch_info['mean_ser_accu'], self.epoch_info['mean_ser_loss'])))
@@ -782,7 +786,7 @@ class Processor(object):
                     self.io.print_log('Done.')
 
                 # save model and weights
-                if self.s2eg_loss_updated or epoch % self.args.save_interval == 0:
+                if self.s2eg_loss_updated or (epoch % self.args.save_interval == 0 and epoch > self.min_train_epochs):
                     torch.save({'gen_model_dict': self.s2eg_generator.state_dict(),
                                 'dis_model_dict': self.s2eg_discriminator.state_dict()},
                                j(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.

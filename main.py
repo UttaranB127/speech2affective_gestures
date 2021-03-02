@@ -52,7 +52,7 @@ parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
                     help='perform data augmentation by mirroring all the sequences (default: False)')
 parser.add_argument('--train-ser', type=bool, default=True, metavar='T-SER',
                     help='train the ser model (default: True)')
-parser.add_argument('--emo-as-cats', type=bool, default=True, metavar='EAC',
+parser.add_argument('--emo-as-cats', type=bool, default=False, metavar='EAC',
                     help='consider emotions as categories (True) or dimensions (False) (default: False)')
 parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')
@@ -76,9 +76,9 @@ parser.add_argument('--s2eg-num-epoch', type=int, default=5000, metavar='S2EG-NE
                     help='number of epochs to train s2eg (default: 1000)')
 # parser.add_argument('--window-length', type=int, default=1, metavar='WL',
 #                     help='max number of past time steps to take as input to transformer decoder (default: 60)')
-parser.add_argument('--ser-optimizer', type=str, default='Adam', metavar='SER-O',
+parser.add_argument('--ser-optimizer', type=str, default='SGD', metavar='SER-O',
                     help='optimizer (default: Adam)')
-parser.add_argument('--base-lr', type=float, default=1e-3, metavar='LR',
+parser.add_argument('--base-lr', type=float, default=1e-2, metavar='LR',
                     help='base learning rate (default: 1e-2)')
 parser.add_argument('--base-tr', type=float, default=1., metavar='TR',
                     help='base teacher rate (default: 1.0)')

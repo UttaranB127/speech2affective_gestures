@@ -13,6 +13,10 @@ skeleton_line_pairs = [(0, 1, 'b'), (1, 2, 'darkred'), (2, 3, 'r'), (3, 4, 'oran
                        (5, 6, 'limegreen'), (6, 7, 'darkseagreen')]
 dir_vec_pairs = [(0, 1, 0.26), (1, 2, 0.18), (2, 3, 0.14), (1, 4, 0.22), (4, 5, 0.36),
                  (5, 6, 0.33), (1, 7, 0.22), (7, 8, 0.36), (8, 9, 0.33)]  # adjacency and bone length
+dir_edge_pairs = [(0, 1), (1, 2), (0, 3), (3, 4), (4, 5), (0, 6), (6, 7), (7, 8)]
+body_parts_edge_idx = [np.arange(0, 3), np.arange(3, 6), np.arange(6, 9)]
+max_body_part_edges = 3
+body_parts_edge_pairs = [(0, 1), (0, 2)]
 
 
 def normalize_string(s):

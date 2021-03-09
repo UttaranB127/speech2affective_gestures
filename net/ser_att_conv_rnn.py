@@ -5,9 +5,11 @@ import torch.nn as nn
 from torch.nn import GRU
 
 
-def truncate_param(param, value):
+def truncate_param(param, value, eps=1e-6):
     param_copy = param.clone()
-    param_copy[torch.abs(param_copy) >= value] = 0.
+    mean = torch.mean(param)
+    param_copy[torch.abs(param_copy) >= value] =\
+        torch.rand_like(param_copy[torch.abs(param_copy) >= value]) * 2. * eps + mean - eps
     return param_copy
 
 
@@ -41,7 +43,7 @@ class AttConvRNN(nn.Module):
                  F1=768,
                  F2=64,
                  bidirectional=True,
-                 dropout_keep_prob=1,
+                 dropout_prob=1,
                  init_mean=0.,
                  init_std=0.01,
                  init_const=0.01):
@@ -75,13 +77,15 @@ class AttConvRNN(nn.Module):
         self.conv6.weight.data = truncate_param(self.conv6.weight.data, init_mean + init_std * 2.)
         nn.init.constant(self.conv6.bias, init_const)
 
-        self.linear1 = nn.Linear(L4 * H * W // pool_stride_height // pool_stride_width,
-                                 F1 * H // pool_stride_height)
+        self.linear1_in_size = L4 * W // pool_stride_width
+        self.linear1 = nn.Linear(self.linear1_in_size, F1)
         nn.init.normal(self.linear1.weight, mean=init_mean, std=init_std)
         self.linear1.weight.data = truncate_param(self.linear1.weight.data, init_mean + init_std * 2.)
         nn.init.constant(self.linear1.bias, init_const)
+        self.batch_norm_linear1 = nn.BatchNorm1d(F1)
 
-        self.gru = nn.GRU(F1, gru_cell_units, batch_first=True, bidirectional=bidirectional)
+        self.gru = nn.LSTM(F1, gru_cell_units, batch_first=True, bidirectional=bidirectional)
+        # self.gru = nn.LSTM(L4 * W // pool_stride_width, gru_cell_units, batch_first=True, bidirectional=bidirectional)
         bias_len = len(self.gru.bias_hh_l0)
         nn.init.constant(self.gru.bias_hh_l0[bias_len // 4:bias_len // 2], 1.)
         nn.init.constant(self.gru.bias_ih_l0[bias_len // 4:bias_len // 2], 1.)
@@ -102,23 +106,33 @@ class AttConvRNN(nn.Module):
         self.linear3.weight.data = truncate_param(self.linear3.weight.data, init_mean + init_std * 2.)
         nn.init.constant(self.linear3.bias, init_const)
 
-        self.activation = nn.ELU()  # nn.LeakyReLU(1e-2)
+        self.dropout = nn.Dropout(dropout_prob)
+        self.activation = nn.LeakyReLU(1e-2)
 
     def forward(self, x):
-        x_01 = self.activation(self.conv1(x))
+        x_01 = self.dropout(self.activation(self.conv1(x)))
         x_02 = self.max_pool1(x_01)
-        x_03 = self.activation(self.conv2(x_02))
-        x_04 = self.activation(self.conv3(x_03))
-        x_05 = self.activation(self.conv4(x_04))
-        x_06 = self.activation(self.conv5(x_05))
-        x_07 = self.activation(self.conv6(x_06)).permute(0, 2, 1, 3)
-        # x_08 = self.activation(self.linear1(x_07.contiguous().view(x_07.shape[0], x_07.shape[1], -1)))
-        x_08 = self.activation(self.linear1(x_07.contiguous().view(x_07.shape[0], -1))).view(x_07.shape[0],
-                                                                                             x_07.shape[1], -1)
+        x_03 = self.dropout(self.activation(self.conv2(x_02)))
+        x_04 = self.dropout(self.activation(self.conv3(x_03)))
+        x_05 = self.dropout(self.activation(self.conv4(x_04)))
+        x_06 = self.dropout(self.activation(self.conv5(x_05)))
+        x_07 = self.dropout(self.activation(self.conv6(x_06))).contiguous().view(-1, self.linear1_in_size)
+        # x_07 = self.dropout(self.activation(self.conv6(x_06))).permute(0, 2, 1, 3)
+        # x_07 = self.dropout(self.activation(self.conv6(x_06)))
+        # x_08 = self.dropout(self.activation(self.linear1(x_07.contiguous().view(x_07.shape[0],
+        #                                                                         -1)))).view(x_07.shape[0],
+        #                                                                                     x_07.shape[2], -1)
+        # x_07 = self.dropout(self.activation(self.conv6(x_06))).permute(0, 2, 1, 3)
+        # x_08 = self.dropout(self.activation(self.linear1(x_07.contiguous().view(x_07.shape[0],
+        #                                                                         -1)))).view(x_07.shape[0],
+        #                                                                                     x_07.shape[1], -1)
+        # x_08 = self.dropout(self.activation(self.linear1(x_07.contiguous().view(x_07.shape[0], x_07.shape[1], -1))))
+        # x_08, _ = self.gru(x_07.contiguous().view(x_07.shape[0], x_07.shape[1], -1))
+        # x_10, alphas = self.attention(x_08)
+        x_08 = self.activation(self.batch_norm_linear1(self.linear1(x_07))).view(x_06.shape[0], x_06.shape[2], -1)
         x_09, _ = self.gru(x_08)
         x_10, alphas = self.attention(x_09)
-        # x_10, alphas = self.attention(x_08)
-        x_11 = self.activation(self.linear2(x_10))
+        x_11 = self.dropout(self.activation(self.linear2(x_10)))
         x_12 = self.linear3(x_11)
 
         # if torch.max(x_12[0] - x_12[1]) < 1e-3 and torch.min(x_12[0] - x_12[1]) < 1e-3:

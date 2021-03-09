@@ -534,7 +534,7 @@ def download_clips(vid_name, start_time, end_time, start_frame, end_frame, save_
 def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False,
                      partition_data=False, block_size=300, filter_num=40):
     partitions = ['train', 'eval', 'test']
-    vid_names_done = [[]] * len(partitions)
+    vid_names_done = [[] for _ in range(len(partitions))]
 
     clip_duration_range = [5, 12]
 
@@ -574,6 +574,7 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
                              config_args.wordembed_dim)
     train_dataset.set_lang_model(lang_model)
     eval_dataset.set_lang_model(lang_model)
+    test_dataset.set_lang_model(lang_model)
 
     if not ted_db_already_processed:
         for part_idx, partition in enumerate(partitions):
@@ -975,7 +976,7 @@ def load_data_with_glove(_path, dataset, embedding_src, frame_drop=1, add_mirror
                     if tag_data[tag_names.index(tag_to_append)] not in tag_categories[category]:
                         tag_categories[category].append(tag_data[tag_names.index(tag_to_append)])
 
-            all_texts = [[]] * len(tag_files)
+            all_texts = [[] for _ in range(len(tag_files))]
             for data_counter, tag_file in enumerate(tag_files):
                 tag_data = []
                 with open(tag_file) as f:

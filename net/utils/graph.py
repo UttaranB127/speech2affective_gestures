@@ -23,50 +23,55 @@ class Graph():
 
     """
 
-    def __init__(self, strategy='uniform',
+    def __init__(self, num_nodes, neighbor_links,
+                 strategy='uniform',
+                 layout='openpose',
                  max_hop=1,
                  dilation=1):
         self.max_hop = max_hop
         self.dilation = dilation
 
-        self.get_edge()
+        self.set_edges(num_nodes, neighbor_links)
         self.hop_dis = get_hop_distance(
-            self.num_node, self.edge, max_hop=max_hop)
-        self.get_adjacency(strategy)
+            self.num_nodes, self.edges, max_hop=max_hop)
+        self.set_adjacency(strategy)
 
     def __str__(self):
         return self.A
 
-    def get_edge(self):
-        self.num_node = 16
-        self_link = [(i, i) for i in range(self.num_node)]
-        neighbor_link = [(0, 1), (0, 10), (0, 13),
-                         (1, 2),
-                         (2, 3), (2, 4), (2, 7),
-                         (4, 5),
-                         (5, 6),
-                         (7, 8),
-                         (8, 9),
-                         (10, 11),
-                         (11, 12),
-                         (13, 14),
-                         (14, 15)]
-        self.edge = self_link + neighbor_link
+    def set_edges(self, num_nodes, neighbor_links, self_link=True):
+        self.num_nodes = num_nodes
+        # neighbor_links = [(0, 1), (0, 10), (0, 13),
+        #                  (1, 2),
+        #                  (2, 3), (2, 4), (2, 7),
+        #                  (4, 5),
+        #                  (5, 6),
+        #                  (7, 8),
+        #                  (8, 9),
+        #                  (10, 11),
+        #                  (11, 12),
+        #                  (13, 14),
+        #                  (14, 15)]
+        if self_link:
+            self_link = [(i, i) for i in range(self.num_nodes)]
+            self.edges = self_link + neighbor_links
+        else:
+            self.edges = neighbor_links
         self.center = 0
 
-    def get_adjacency(self, strategy):
+    def set_adjacency(self, strategy):
         valid_hop = range(0, self.max_hop + 1, self.dilation)
-        adjacency = np.zeros((self.num_node, self.num_node))
+        adjacency = np.zeros((self.num_nodes, self.num_nodes))
         for hop in valid_hop:
             adjacency[self.hop_dis == hop] = 1
         normalize_adjacency = normalize_digraph(adjacency)
 
         if strategy == 'uniform':
-            A = np.zeros((1, self.num_node, self.num_node))
+            A = np.zeros((1, self.num_nodes, self.num_nodes))
             A[0] = normalize_adjacency
             self.A = A
         elif strategy == 'distance':
-            A = np.zeros((len(valid_hop), self.num_node, self.num_node))
+            A = np.zeros((len(valid_hop), self.num_nodes, self.num_nodes))
             for i, hop in enumerate(valid_hop):
                 A[i][self.hop_dis == hop] = normalize_adjacency[self.hop_dis ==
                                                                 hop]
@@ -74,11 +79,11 @@ class Graph():
         elif strategy == 'spatial':
             A = []
             for hop in valid_hop:
-                a_root = np.zeros((self.num_node, self.num_node))
-                a_close = np.zeros((self.num_node, self.num_node))
-                a_further = np.zeros((self.num_node, self.num_node))
-                for i in range(self.num_node):
-                    for j in range(self.num_node):
+                a_root = np.zeros((self.num_nodes, self.num_nodes))
+                a_close = np.zeros((self.num_nodes, self.num_nodes))
+                a_further = np.zeros((self.num_nodes, self.num_nodes))
+                for i in range(self.num_nodes):
+                    for j in range(self.num_nodes):
                         if self.hop_dis[j, i] == hop:
                             if self.hop_dis[j, self.center] == self.hop_dis[
                                     i, self.center]:
@@ -97,17 +102,17 @@ class Graph():
             A = np.stack(A)
             self.A = A
         else:
-            raise ValueError("Do Not Exist This Strategy")
+            raise ValueError('The given strategy does not exist')
 
 
-def get_hop_distance(num_node, edge, max_hop=1):
-    A = np.zeros((num_node, num_node))
-    for i, j in edge:
-        A[j, i] = 1
-        A[i, j] = 1
+def get_hop_distance(num_nodes, edges, max_hop=1):
+    A = np.zeros((num_nodes, num_nodes))
+    for edge in edges:
+        A[edge[0], edge[1]] = 1
+        A[edge[1], edge[0]] = 1
 
     # compute hop steps
-    hop_dis = np.zeros((num_node, num_node)) + np.inf
+    hop_dis = np.zeros((num_nodes, num_nodes)) + np.inf
     transfer_mat = [np.linalg.matrix_power(A, d) for d in range(max_hop + 1)]
     arrive_mat = (np.stack(transfer_mat) > 0)
     for d in range(max_hop, -1, -1):
@@ -126,7 +131,7 @@ def normalize_digraph(A):
     return AD
 
 
-def normalize_undigraph(A):
+def normalize_un_digraph(A):
     Dl = np.sum(A, 0)
     num_node = A.shape[0]
     Dn = np.zeros((num_node, num_node))

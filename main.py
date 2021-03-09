@@ -50,9 +50,9 @@ parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
 parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
                     help='perform data augmentation by mirroring all the sequences (default: False)')
-parser.add_argument('--train-ser', type=bool, default=True, metavar='T-SER',
+parser.add_argument('--train-ser', type=bool, default=False, metavar='T-SER',
                     help='train the ser model (default: True)')
-parser.add_argument('--emo-as-cats', type=bool, default=False, metavar='EAC',
+parser.add_argument('--emo-as-cats', type=bool, default=True, metavar='EAC',
                     help='consider emotions as categories (True) or dimensions (False) (default: False)')
 parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')
@@ -66,11 +66,11 @@ parser.add_argument('--batch-size', type=int, default=16, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--ser-start-epoch', type=int, default=0, metavar='SER-SE',
+parser.add_argument('--ser-start-epoch', type=int, default=600, metavar='SER-SE',
                     help='starting epoch of training of ser (default: 0)')
 parser.add_argument('--ser-num-epoch', type=int, default=5000, metavar='SER-NE',
                     help='number of epochs to train ser (default: 1000)')
-parser.add_argument('--s2eg-start-epoch', type=int, default=202, metavar='S2EG-SE',
+parser.add_argument('--s2eg-start-epoch', type=int, default=142, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
 parser.add_argument('--s2eg-num-epoch', type=int, default=5000, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')
@@ -78,14 +78,16 @@ parser.add_argument('--s2eg-num-epoch', type=int, default=5000, metavar='S2EG-NE
 #                     help='max number of past time steps to take as input to transformer decoder (default: 60)')
 parser.add_argument('--ser-optimizer', type=str, default='Adam', metavar='SER-O',
                     help='optimizer (default: Adam)')
-parser.add_argument('--base-lr', type=float, default=1e-3, metavar='LR',
-                    help='base learning rate (default: 1e-2)')
+parser.add_argument('--base-lr-ser', type=float, default=1e-3, metavar='LR-SER',
+                    help='base learning rate for ser (default: 1e-2)')
 parser.add_argument('--base-tr', type=float, default=1., metavar='TR',
                     help='base teacher rate (default: 1.0)')
 parser.add_argument('--step', type=list, default=0.05 * np.arange(20), metavar='[S]',
                     help='fraction of steps when learning rate will be decreased (default: [0.5, 0.75, 0.875])')
-parser.add_argument('--lr-decay', type=float, default=0.9999, metavar='LRD',
-                    help='learning rate decay (default: 0.999)')
+parser.add_argument('--lr-ser-decay', type=float, default=0.9999, metavar='LRD-SER',
+                    help='learning rate decay for ser (default: 0.999)')
+parser.add_argument('--lr-s2eg-decay', type=float, default=0.999, metavar='LRD-S2EG',
+                    help='learning rate decay for s2eg (default: 0.999)')
 parser.add_argument('--gradient-clip', type=float, default=0.1, metavar='GC',
                     help='gradient clip threshold (default: 0.1)')
 parser.add_argument('--nesterov', action='store_true', default=True,
@@ -125,7 +127,7 @@ randomized = False
 
 config_args = parse_args()
 
-if args.train_s2eg:
+if not args.train_ser:
     train_data_ted, eval_data_ted, test_data_ted,\
         train_data_ted_wav, eval_data_ted_wav, test_data_ted_wav,\
         ted_wav_max_all, ted_wav_min_all = loader.load_ted_db_data(data_path,
@@ -134,22 +136,16 @@ if args.train_s2eg:
                                                                    args.dataset_s2eg_already_processed)
     # train_ted_wav_dict, eval_ted_wav_dict, test_ted_wav_dict,\
     pose_dim = 27  # 9 x 3
+    time_steps = 34
 else:
     train_data_ted, eval_data_ted, test_data_ted, \
         train_data_ted_wav, eval_data_ted_wav, test_data_ted_wav, \
-        ted_wav_max_all, ted_wav_min_all, pose_dim = [None] * 9
+        ted_wav_max_all, ted_wav_min_all, pose_dim, time_steps = [None] * 10
 
-if args.train_ser:
-    train_data_wav, eval_data_wav, test_data_wav, \
-        train_labels_cat, eval_labels_cat, test_labels_cat, \
-        train_labels_dim, eval_labels_dim, test_labels_dim, \
-        means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
-else:
-    train_data_wav, eval_data_wav, test_data_wav, \
-        train_labels_cat, eval_labels_cat, test_labels_cat, \
-        train_labels_dim, eval_labels_dim, test_labels_dim, \
-        means, stds = [None] * 11
-
+train_data_wav, eval_data_wav, test_data_wav, \
+    train_labels_cat, eval_labels_cat, test_labels_cat, \
+    train_labels_dim, eval_labels_dim, test_labels_dim, \
+    means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
 _, wav_channels, wav_height, wav_width = train_data_wav.shape
 num_emo_cats = train_labels_cat.shape[-1]
 num_emo_dims = train_labels_dim.shape[-1]
@@ -161,6 +157,9 @@ else:
 args.work_dir_s2eg = j(models_s2eg_path, args.dataset_s2eg)
 os.makedirs(args.work_dir_ser, exist_ok=True)
 os.makedirs(args.work_dir_s2eg, exist_ok=True)
+
+args.video_save_path = j(base_path, 'outputs', 'videos')
+os.makedirs(args.video_save_path, exist_ok=True)
 
 data_loader = dict(train_data_ser=train_data_wav, train_data_s2eg=train_data_ted,
                    train_data_s2eg_wav=train_data_ted_wav,  # train_data_s2eg_wav_dict=train_ted_wav_dict,
@@ -175,8 +174,9 @@ data_loader = dict(train_data_ser=train_data_wav, train_data_s2eg=train_data_ted
 pr = processor.Processor(args, config_args, data_path, data_loader,
                          wav_channels, wav_height, wav_width,
                          num_emo_cats, num_emo_dims, pose_dim,
-                         save_path=base_path)
+                         time_steps, save_path=base_path)
 
-pr.train()
+if args.train_ser or args.train_s2eg:
+    pr.train()
 
-pr.generate_motion(samples_to_generate=len(data_loader['test']), randomized=randomized)
+pr.generate_motion(samples_to_generate=10, randomized=randomized, ser_epoch='best', s2eg_epoch=142)

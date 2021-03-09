@@ -1,10 +1,13 @@
 import torch
 import torch.nn as nn
 
+import utils.ted_db_utils as ted_db
 # import net.embedding_net as embedding_net
 
-from utils import vocab
 from net.tcn import TemporalConvNet
+from net.utils.graph import Graph
+from net.utils.tgcn import STGraphConv
+from utils import vocab
 
 
 class WavEncoder(nn.Module):
@@ -132,10 +135,7 @@ class PoseGenerator(nn.Module):
         # z vector; speaker embedding or random noise
         if self.z_obj:
             if self.speaker_embedding:
-                try:
-                    assert vid_indices is not None
-                except AssertionError:
-                    temp = 1
+                assert vid_indices is not None
                 z_context = self.speaker_embedding(vid_indices)
                 z_mu = self.speaker_mu(z_context)
                 z_log_var = self.speaker_log_var(z_context)
@@ -264,3 +264,106 @@ class ConvDiscriminator(nn.Module):
         output = torch.sigmoid(output)
 
         return output
+
+
+class AffDiscriminator(nn.Module):
+    def __init__(self, input_size, num_emo_labels, coords=3):
+        super().__init__()
+        self.input_size = input_size
+        self.coords = coords
+        self.hidden_size = 64
+
+        graph1 = Graph(len(ted_db.dir_edge_pairs) + 1,
+                       ted_db.dir_edge_pairs,
+                       strategy='spatial',
+                       max_hop=2)
+        self.A1 = torch.tensor(graph1.A,
+                               dtype=torch.float32,
+                               requires_grad=False).cuda()
+        self.num_body_parts = len(ted_db.body_parts_edge_idx)
+        graph2 = Graph(len(ted_db.body_parts_edge_pairs) + 1,
+                       ted_db.body_parts_edge_pairs,
+                       strategy='spatial',
+                       max_hop=2)
+        self.A2 = torch.tensor(graph2.A,
+                               dtype=torch.float32,
+                               requires_grad=False).cuda()
+        spatial_kernel_size1 = 5
+        temporal_kernel_size1 = 9
+        kernel_size1 = (temporal_kernel_size1, spatial_kernel_size1)
+        padding1 = ((kernel_size1[0] - 1) // 2, (kernel_size1[1] - 1) // 2)
+
+        self.st_gcn1 = STGraphConv(coords, 16, self.A1.size(0), kernel_size1,
+                                   stride=(1, 1), padding=padding1)
+
+        spatial_kernel_size2 = 3
+        temporal_kernel_size2 = 9
+        kernel_size2 = (temporal_kernel_size2, spatial_kernel_size2)
+        padding2 = ((kernel_size2[0] - 1) // 2, (kernel_size2[1] - 1) // 2)
+        self.st_gcn2 = STGraphConv(48, 16, self.A2.size(0), kernel_size2,
+                                   stride=(1, 1), padding=padding2)
+        # self.pre_conv = nn.Sequential(
+        #     nn.Conv1d(input_size, 16, 3),
+        #     nn.BatchNorm1d(16),
+        #     nn.LeakyReLU(True),
+        #     nn.Conv1d(16, 8, 3),
+        #     nn.BatchNorm1d(8),
+        #     nn.LeakyReLU(True),
+        #     nn.Conv1d(8, 8, 3),
+        # )
+        kernel_size3 = 5
+        padding3 = (kernel_size3 - 1) // 2
+        self.conv1 = nn.Conv1d(48, 16, kernel_size3, padding=padding3)
+        self.batch_norm1 = nn.BatchNorm1d(16)
+
+        kernel_size4 = 3
+        padding4 = (kernel_size4 - 1) // 2
+        self.conv2 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
+        self.batch_norm2 = nn.BatchNorm1d(8)
+
+        self.gru = nn.GRU(8 + num_emo_labels, hidden_size=self.hidden_size,
+                          num_layers=4, bidirectional=True,
+                          dropout=0.3, batch_first=True)
+        self.out = nn.Linear(self.hidden_size, 1)
+        self.out2 = nn.Linear(34, 1)
+
+        self.activation = nn.ReLU(inplace=True)
+
+        self.do_flatten_parameters = False
+        if torch.cuda.device_count() > 1:
+            self.do_flatten_parameters = True
+
+    def forward(self, poses, in_emo_labels, in_text=None):
+        decoder_hidden = None
+        if self.do_flatten_parameters:
+            self.gru.flatten_parameters()
+
+        n, t, jc = poses.shape
+        j = jc // self.coords
+        # poses = torch.cat((poses, torch.zeros_like(poses[..., 0:3])), dim=-1)
+        feat1_out, _ = self.st_gcn1(poses.view(n, t, -1, 3).permute(0, 3, 1, 2), self.A1)
+        f1 = feat1_out.shape[1]
+        feat2_in = torch.zeros((n, t,
+                                ted_db.max_body_part_edges * f1,
+                                self.num_body_parts)).float().cuda()
+        for idx, body_part_idx in enumerate(ted_db.body_parts_edge_idx):
+            feat2_in[..., :f1 * len(body_part_idx), idx] =\
+                feat1_out[..., body_part_idx].permute(0, 2, 1, 3).contiguous().view(n, t, -1)
+        feat2_in = feat2_in.permute(0, 2, 1, 3)
+        feat2_out, _ = self.st_gcn2(feat2_in, self.A2)
+        feat3_in = feat2_out.permute(0, 2, 1, 3).contiguous().view(n, t, -1).permute(0, 2, 1)
+        feat3_out = self.activation(self.batch_norm1(self.conv1(feat3_in)))
+        feat4_out = self.activation(self.batch_norm2(self.conv2(feat3_out))).permute(0, 2, 1)
+        feat5_in = torch.cat((feat4_out, in_emo_labels.unsqueeze(1).repeat((1, 34, 1))), dim=-1)
+        # poses = poses.transpose(1, 2)
+        # feat = self.pre_conv(poses).transpose(1, 2)
+
+        output_gru, decoder_hidden = self.gru(feat5_in, decoder_hidden)
+        # sum bidirectional outputs
+        output_gru_bi = output_gru[:, :, :self.hidden_size] + output_gru[:, :, self.hidden_size:]
+
+        # apply linear to every output
+        output_linear1 = self.out(output_gru_bi.contiguous().view(-1, output_gru_bi.shape[2])).view(n, -1)
+        output_linear2 = self.out2(output_linear1)
+
+        return torch.sigmoid(output_linear2)

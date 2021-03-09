@@ -652,7 +652,9 @@ class Processor(object):
                 sentence_words.append(word)
             sentences = [' '.join(sentence_word) for sentence_word in sentence_words]
 
-            for vid_idx in range(len(aux_info)):
+            num_videos = len(aux_info)
+            for vid_idx in range(num_videos):
+                start_time = time.time()
                 filename_prefix = '{}_{}'.format(aux_info[vid_idx]['vid'], vid_idx)
                 filename_prefix_for_video = filename_prefix
                 aux_str = '({}, time: {}-{})'.format(aux_info[vid_idx]['vid'],
@@ -666,6 +668,11 @@ class Processor(object):
                     np.reshape(self.data_loader['test_data_s2eg'].mean_dir_vec, -1), sentences[vid_idx],
                     audio=in_audio[vid_idx].cpu().numpy(), aux_str=aux_str,
                     clipping_to_shortest_stream=True, delete_audio_file=False)
+                print('\rRendered {} of {} videos. Last one took {:.2f} seconds.'.format(vid_idx + 1,
+                                                                                         num_videos,
+                                                                                         time.time() - start_time),
+                      end='')
+            print()
         # loss
         beta = 0.1
         huber_loss = F.smooth_l1_loss(out_dir_vec / beta, target_poses / beta) * beta
@@ -977,4 +984,4 @@ class Processor(object):
                                                save_path=self.args.video_save_path,
                                                make_video=True)
         end_time = time.time()
-        print('Total time taken: {:.2f} secs.'.format(end_time - start_time))
+        print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))

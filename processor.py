@@ -977,4 +977,4 @@ class Processor(object):
                                                save_path=self.args.video_save_path,
                                                make_video=True)
         end_time = time.time()
-        print('Time taken: {} secs.'.format(end_time - start_time))
+        print('Total time taken: {} secs.'.format(end_time - start_time))

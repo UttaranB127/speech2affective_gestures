@@ -968,20 +968,23 @@ class Processor(object):
         self.ser_model.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
+        batch_size = 64
 
         start_time = time.time()
-        test_data_wav, test_labels_cat, test_labels_dim, words,\
-            aux_info, word_seq_tensor, word_seq_lengths, extended_word_seq, \
-            pose_seq, vec_seq, target_seq, audio, spectrogram, vid_indices = \
-            self.return_batch([samples_to_generate], randomized=randomized)
-        with torch.no_grad():
-            ser_loss, eval_labels_pred, eval_labels_oh = \
-                self.forward_pass_ser(test_data_wav,
-                                      test_labels_cat if self.args.emo_as_cats else test_labels_dim)
-            loss_dict = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
-                                               vec_seq, vid_indices, train=False,
-                                               target_seq=target_seq, words=words, aux_info=aux_info,
-                                               save_path=self.args.video_save_path,
-                                               make_video=True)
+        for sample_idx in np.arange(0, samples_to_generate, batch_size):
+            samples_curr = min(batch_size, samples_to_generate - sample_idx)
+            test_data_wav, test_labels_cat, test_labels_dim, words,\
+                aux_info, word_seq_tensor, word_seq_lengths, extended_word_seq, \
+                pose_seq, vec_seq, target_seq, audio, spectrogram, vid_indices = \
+                self.return_batch([samples_curr], randomized=randomized)
+            with torch.no_grad():
+                ser_loss, eval_labels_pred, eval_labels_oh = \
+                    self.forward_pass_ser(test_data_wav,
+                                          test_labels_cat if self.args.emo_as_cats else test_labels_dim)
+                loss_dict = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
+                                                   vec_seq, vid_indices, train=False,
+                                                   target_seq=target_seq, words=words, aux_info=aux_info,
+                                                   save_path=self.args.video_save_path,
+                                                   make_video=True)
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))

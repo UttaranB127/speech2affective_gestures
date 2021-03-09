@@ -179,4 +179,4 @@ pr = processor.Processor(args, config_args, data_path, data_loader,
 if args.train_ser or args.train_s2eg:
     pr.train()
 
-pr.generate_motion(samples_to_generate=50, randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+pr.generate_motion(samples_to_generate=3000, randomized=randomized, ser_epoch='best', s2eg_epoch=142)

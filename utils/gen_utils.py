@@ -134,7 +134,7 @@ def create_video_and_save(save_path, epoch, prefix, iter_idx, target, output, me
             os.remove(audio_path)
         os.remove(video_path)
 
-    print('done, took {:.1f} seconds'.format(time.time() - start))
+    print('done, took {:.2f} seconds'.format(time.time() - start))
     return output_poses, target_poses
 
 

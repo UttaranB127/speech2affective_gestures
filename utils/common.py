@@ -8,6 +8,9 @@ from sklearn.decomposition import PCA
 from torch.autograd import Variable
 # from utils.Quaternions import Quaternions
 
+emotions_names_10_cats = ['neu', 'hap', 'exc', 'sur', 'fea', 'sad', 'dis', 'ang', 'fru', 'oth']
+emotions_names_07_cats = ['neu', 'hap', 'fea', 'sad', 'dis', 'ang', 'oth']
+
 
 def fleiss_kappa(M):
     """

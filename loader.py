@@ -12,6 +12,7 @@ import pyttsx3
 import re
 import wave
 
+import utils.common as cmn
 import utils.constant as constant
 
 from joblib import Parallel, delayed
@@ -26,8 +27,6 @@ from utils.vocab import Vocab
 from utils.vocab_utils import build_vocab
 
 
-emotions_names_10_cats = ['neu', 'hap', 'exc', 'sur', 'fea', 'sad', 'dis', 'ang', 'fru', 'oth']
-emotions_names_07_cats = ['neu', 'hap', 'fea', 'sad', 'dis', 'ang', 'oth']
 nrc_vad_lexicon_file = '../../data/NRC-VAD-Lexicon-Aug2018Release/NRC-VAD-Lexicon.txt'
 nrc_vad_lexicon = {}
 
@@ -152,16 +151,16 @@ def extract_07_categorical_emotions(string):
         string = 'ang'
     if string == 'xxx':
         string = 'oth'
-    emotions_cat = np.zeros(len(emotions_names_07_cats), dtype=int)
-    emotions_cat[emotions_names_07_cats.index(string)] = 1
+    emotions_cat = np.zeros(len(cmn.emotions_names_07_cats), dtype=int)
+    emotions_cat[cmn.emotions_names_07_cats.index(string)] = 1
     return emotions_cat
 
 
 def extract_10_categorical_emotions(string):
     if string == 'xxx':
         string = 'oth'
-    emotions_cat = np.zeros(len(emotions_names_10_cats), dtype=int)
-    emotions_cat[emotions_names_10_cats.index(string)] = 1
+    emotions_cat = np.zeros(len(cmn.emotions_names_10_cats), dtype=int)
+    emotions_cat[cmn.emotions_names_10_cats.index(string)] = 1
     return emotions_cat
 
 
@@ -426,7 +425,7 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         with open(stats_file, 'rb') as af:
             stats = pickle.load(af)
         max_all = np.array(stats[:3])
-        min_all = np.array(stats[4:])
+        min_all = np.array(stats[3:])
 
     return train_data_wav, eval_data_wav, test_data_wav, \
         train_labels_cat, eval_labels_cat, test_labels_cat, \
@@ -851,7 +850,7 @@ def load_ted_db_data(_path, dataset, config_args, ted_db_already_processed=False
     with open(stats_file, 'rb') as af:
         stats = pickle.load(af)
     max_all = np.array(stats[:3])
-    min_all = np.array(stats[4:])
+    min_all = np.array(stats[3:])
 
     # for part_idx, partition in enumerate(partitions):
     #     dir_wav = j(_path, dataset, 'waves', partition)

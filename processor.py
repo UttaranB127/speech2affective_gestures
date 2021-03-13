@@ -16,6 +16,8 @@ import torch.nn.functional as F
 from os.path import join as j
 from torchlight.torchlight.io import IO
 
+import utils.common as cmn
+
 from net.ser_att_conv_rnn import AttConvRNN
 from net.multimodal_context_net import PoseGeneratorTriModal as PGT, ConvDiscriminatorTriModal as CDT
 from net.multimodal_context_net import PoseGenerator, AffDiscriminator
@@ -1044,7 +1046,7 @@ class Processor(object):
         with lmdb_env.begin(write=False) as txn:
             keys = [key for key, _ in txn.cursor()]
             for sample_idx in range(samples_to_generate):  # loop until we get the desired number of results
-                start_time = audio_time.time()
+                start_time = time.time()
                 # select video
                 if randomized:
                     key = np.random.choice(keys)
@@ -1120,7 +1122,6 @@ class Processor(object):
                                                   audio_sample_length))
 
                 out_dir_vec = None
-                start = audio_time.time()
                 for i in range(0, num_subdivision):
                     overall_start_time = i * stride_time
                     end_time = overall_start_time + unit_time
@@ -1181,12 +1182,15 @@ class Processor(object):
                         delta21 = np.pad(delta21, ((0, audio_block_size - delta21.shape[0]), (0, 0)), 'constant',
                                          constant_values=0)
                         data_wav = np.concatenate((data_wav,
-                                                   np.concatenate((part, delta11, delta21), axis=0)), axis=0)
+                                                   np.expand_dims(
+                                                       np.concatenate((np.expand_dims(part, 0),
+                                                                       np.expand_dims(delta11, 0),
+                                                                       np.expand_dims(delta21, 0)), axis=0), 0)),
+                                                  axis=0)
                     else:
                         for begin in np.arange(0, audio_time, 100):
                             end = begin + audio_block_size
                             end_from_last = audio_time - begin
-                            begin_from_last = end_from_last - audio_block_size
                             if end > audio_time:
                                 break
 
@@ -1195,13 +1199,19 @@ class Processor(object):
                             delta21 = delta2[begin:end, :]
 
                             data_wav = np.concatenate((data_wav,
-                                                       np.concatenate((part, delta11, delta21), axis=0)), axis=0)
+                                                       np.expand_dims(
+                                                           np.concatenate((np.expand_dims(part, 0),
+                                                                           np.expand_dims(delta11, 0),
+                                                                           np.expand_dims(delta21, 0)), axis=0), 0)),
+                                                      axis=0)
                     data_wav = torch.from_numpy(
-                        (data_wav - self.data_loader['ted_wav_min_all']) /
-                        (self.data_loader['ted_wav_max_all'] -
-                         self.data_loader['ted_wav_min_all'])).float().to(self.device)
+                        (data_wav - self.data_loader['ted_wav_min_all'][None, :, None, None]) /
+                        (self.data_loader['ted_wav_max_all'][None, :, None, None] -
+                         self.data_loader['ted_wav_min_all'][None, :, None, None])).float().to(self.device)
 
                     _, _, test_labels_oh = self.forward_pass_ser(data_wav)
+                    print('Subdivision: {:02d}. Predicted speech emotion: {}'.
+                          format(i, cmn.emotions_names_07_cats[np.where(test_labels_oh)[0]]))
 
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()

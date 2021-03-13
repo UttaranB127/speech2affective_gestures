@@ -145,7 +145,7 @@ else:
 train_data_wav, eval_data_wav, test_data_wav, \
     train_labels_cat, eval_labels_cat, test_labels_cat, \
     train_labels_dim, eval_labels_dim, test_labels_dim, \
-    means, stds = loader.load_iemocap_data(data_path, args.dataset_ser)
+    iemocap_wav_max_all, iemocap_wav_min_all = loader.load_iemocap_data(data_path, args.dataset_ser)
 _, wav_channels, wav_height, wav_width = train_data_wav.shape
 num_emo_cats = train_labels_cat.shape[-1]
 num_emo_dims = train_labels_dim.shape[-1]
@@ -169,7 +169,8 @@ data_loader = dict(train_data_ser=train_data_wav, train_data_s2eg=train_data_ted
                    eval_labels_cat=eval_labels_cat, eval_labels_dim=eval_labels_dim,
                    test_data_ser=test_data_wav, test_data_s2eg=test_data_ted,
                    test_data_s2eg_wav=test_data_ted_wav,  # test_data_s2eg_wav_dict=test_ted_wav_dict,
-                   test_labels_cat=test_labels_cat, test_labels_dim=test_labels_dim, )
+                   test_labels_cat=test_labels_cat, test_labels_dim=test_labels_dim,
+                   ted_wav_max_all=ted_wav_max_all, ted_wav_min_all=ted_wav_min_all)
 
 pr = processor.Processor(args, config_args, data_path, data_loader,
                          wav_channels, wav_height, wav_width,

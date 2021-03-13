@@ -6,6 +6,7 @@ import numpy as np
 import os
 import pickle
 import pyarrow
+import python_speech_features as ps
 import time
 import torch
 import torch.optim as optim
@@ -1003,10 +1004,10 @@ class Processor(object):
                 pose_seq, vec_seq, target_seq, audio, spectrogram, vid_indices = \
                 self.return_batch([samples_curr], randomized=randomized)
             with torch.no_grad():
-                ser_loss, eval_labels_pred, eval_labels_oh = \
+                ser_loss, test_labels_pred, test_labels_oh = \
                     self.forward_pass_ser(test_data_wav,
                                           test_labels_cat if self.args.emo_as_cats else test_labels_dim)
-                loss_dict = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
+                loss_dict = self.forward_pass_s2eg(extended_word_seq, audio, test_labels_oh,
                                                    vec_seq, vid_indices, train=False,
                                                    target_seq=target_seq, words=words, aux_info=aux_info,
                                                    save_path=self.args.video_save_path,
@@ -1015,8 +1016,9 @@ class Processor(object):
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 
     def generate_motion_by_env_file(self, env_file, samples_to_generate=5,
-                                    clip_duration_range=None, audio_sr=16000,
-                                    randomized=True, fade_out=False,
+                                    clip_duration_range=None, audio_fr=44100,
+                                    fft_filter_num=40, audio_block_size=300,
+                                    audio_sr=16000, randomized=True, fade_out=False,
                                     load_saved_model=True, ser_epoch='best', s2eg_epoch='best'):
 
         if clip_duration_range is None:
@@ -1035,13 +1037,14 @@ class Processor(object):
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
         batch_size = 64
+        mean_dir_vec = np.squeeze(np.array(self.config_args.mean_dir_vec))
 
         overall_start_time = time.time()
         lmdb_env = lmdb.open(env_file, readonly=True, lock=False)
         with lmdb_env.begin(write=False) as txn:
             keys = [key for key, _ in txn.cursor()]
             for sample_idx in range(samples_to_generate):  # loop until we get the desired number of results
-                start_time = time.time()
+                start_time = audio_time.time()
                 # select video
                 if randomized:
                     key = np.random.choice(keys)
@@ -1049,7 +1052,7 @@ class Processor(object):
                     key = keys[sample_idx]
                 buf = txn.get(key)
                 video = pyarrow.deserialize(buf)
-                vid = video['vid']
+                vid_name = video['vid']
                 clips = video['clips']
                 n_clips = len(clips)
                 if n_clips == 0:
@@ -1064,7 +1067,7 @@ class Processor(object):
                                                self.config_args.motion_resampling_framerate)
                 target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses)
                 target_dir_vec = target_dir_vec.reshape(target_dir_vec.shape[0], -1)
-                target_dir_vec -= self.config_args.mean_dir_vec
+                target_dir_vec -= mean_dir_vec
 
                 # check duration
                 clip_duration = clip_time[1] - clip_time[0]
@@ -1076,7 +1079,7 @@ class Processor(object):
                     clip_words[selected_vi][1] -= clip_time[0]  # start time
                     clip_words[selected_vi][2] -= clip_time[0]  # end time
 
-                vid_idx = np.random.sample(range(0, self.test_speaker_model.n_words), 1)[0]
+                vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
 
                 out_list = []
                 n_frames = self.config_args.n_poses
@@ -1084,7 +1087,7 @@ class Processor(object):
                 seed_seq = target_dir_vec[0:self.config_args.n_pre_poses]
 
                 # pre seq
-                pre_seq = torch.zeros((1, n_frames, len(self.config_args.mean_dir_vec) + 1))
+                pre_seq = torch.zeros((1, n_frames, self.P + 1))
                 if seed_seq is not None:
                     pre_seq[0, 0:self.config_args.n_pre_poses, :-1] =\
                         torch.Tensor(seed_seq[0:self.config_args.n_pre_poses])
@@ -1106,18 +1109,18 @@ class Processor(object):
 
                 # prepare speaker input
                 if self.config_args.z_type == 'speaker':
-                    if not vid:
-                        vid = np.random.randint(0, self.s2eg_generator.z_obj.n_words)
-                    print('vid:', vid)
-                    vid = torch.LongTensor([vid]).to(self.device)
+                    if not vid_idx:
+                        vid_idx = np.random.randint(0, self.s2eg_generator.z_obj.n_words)
+                    print('vid idx:', vid_idx)
+                    vid_idx = torch.LongTensor([vid_idx]).to(self.device)
                 else:
-                    vid = None
+                    vid_idx = None
 
                 print('{}, {}, {}, {}, {}'.format(num_subdivision, unit_time, clip_length, stride_time,
                                                   audio_sample_length))
 
                 out_dir_vec = None
-                start = time.time()
+                start = audio_time.time()
                 for i in range(0, num_subdivision):
                     overall_start_time = i * stride_time
                     end_time = overall_start_time + unit_time
@@ -1128,12 +1131,12 @@ class Processor(object):
                     # prepare audio input
                     audio_start = math.floor(overall_start_time / clip_length * len(clip_audio))
                     audio_end = audio_start + audio_sample_length
-                    in_audio = clip_audio[audio_start:audio_end]
-                    if len(in_audio) < audio_sample_length:
+                    in_audio_np = clip_audio[audio_start:audio_end]
+                    if len(in_audio_np) < audio_sample_length:
                         if i == num_subdivision - 1:
-                            end_padding_duration = audio_sample_length - len(in_audio)
-                        in_audio = np.pad(in_audio, (0, audio_sample_length - len(in_audio)), 'constant')
-                    in_audio = torch.from_numpy(in_audio).unsqueeze(0).to(self.device).float()
+                            end_padding_duration = audio_sample_length - len(in_audio_np)
+                        in_audio_np = np.pad(in_audio_np, (0, audio_sample_length - len(in_audio_np)), 'constant')
+                    in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
 
                     # prepare text input
                     word_seq = DataPreprocessor.get_words_in_time_range(word_list=clip_words,
@@ -1161,7 +1164,46 @@ class Processor(object):
                     pre_seq = pre_seq.float().to(self.device)
                     pre_seq_partial = pre_seq[0, 0:self.config_args.n_pre_poses, :-1].unsqueeze(0)
 
-                    out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, vid)
+                    mel_spec = ps.logfbank(in_audio_np, audio_fr, nfilt=fft_filter_num, nfft=2048)
+                    delta1 = ps.delta(mel_spec, 2)
+                    delta2 = ps.delta(delta1, 2)
+
+                    data_wav = np.zeros((0, 3, audio_block_size, fft_filter_num))
+                    audio_time = mel_spec.shape[0]
+                    if audio_time <= audio_block_size:
+                        part = mel_spec
+                        delta11 = delta1
+                        delta21 = delta2
+                        part = np.pad(part, ((0, audio_block_size - part.shape[0]), (0, 0)), 'constant',
+                                      constant_values=0)
+                        delta11 = np.pad(delta11, ((0, audio_block_size - delta11.shape[0]), (0, 0)), 'constant',
+                                         constant_values=0)
+                        delta21 = np.pad(delta21, ((0, audio_block_size - delta21.shape[0]), (0, 0)), 'constant',
+                                         constant_values=0)
+                        data_wav = np.concatenate((data_wav,
+                                                   np.concatenate((part, delta11, delta21), axis=0)), axis=0)
+                    else:
+                        for begin in np.arange(0, audio_time, 100):
+                            end = begin + audio_block_size
+                            end_from_last = audio_time - begin
+                            begin_from_last = end_from_last - audio_block_size
+                            if end > audio_time:
+                                break
+
+                            part = mel_spec[begin:end, :]
+                            delta11 = delta1[begin:end, :]
+                            delta21 = delta2[begin:end, :]
+
+                            data_wav = np.concatenate((data_wav,
+                                                       np.concatenate((part, delta11, delta21), axis=0)), axis=0)
+                    data_wav = torch.from_numpy(
+                        (data_wav - self.data_loader['ted_wav_min_all']) /
+                        (self.data_loader['ted_wav_max_all'] -
+                         self.data_loader['ted_wav_min_all'])).float().to(self.device)
+
+                    _, _, test_labels_oh = self.forward_pass_ser(data_wav)
+
+                    out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
 
                     # smoothing motion transition
@@ -1188,7 +1230,7 @@ class Processor(object):
                     if len(out_dir_vec) < end_frame:
                         out_dir_vec = np.pad(out_dir_vec, [(0, end_frame - len(out_dir_vec)), (0, 0)], mode='constant')
                     out_dir_vec[end_frame - n_smooth:] =\
-                        np.zeros((len(self.config_args.mean_dir_vec)))  # fade out to mean poses
+                        np.zeros(self.P)  # fade out to mean poses
 
                     # interpolation
                     y = out_dir_vec[start_frame:end_frame]
@@ -1209,32 +1251,32 @@ class Processor(object):
                     sentence_words.append(word)
                 sentence = ' '.join(sentence_words)
 
-                filename_prefix = '{}_{}_{}'.format(vid, vid_idx, clip_idx)
+                filename_prefix = '{}_{}_{}'.format(vid_name, vid_idx, clip_idx)
                 filename_prefix_for_video = filename_prefix
-                aux_str = '({}, time: {}-{})'.format(vid, str(datetime.timedelta(seconds=clip_time[0])),
+                aux_str = '({}, time: {}-{})'.format(vid_name, str(datetime.timedelta(seconds=clip_time[0])),
                                                      str(datetime.timedelta(seconds=clip_time[1])))
                 create_video_and_save(
                     self.args.video_save_path, 0, filename_prefix_for_video, 0, target_dir_vec,
-                    out_dir_vec, out_dir_vec, self.config_args.mean_dir_vec, sentence,
+                    out_dir_vec, out_dir_vec, mean_dir_vec, sentence,
                     audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
                     delete_audio_file=False)
 
                 # save pkl
-                out_dir_vec = out_dir_vec + self.config_args.mean_dir_vec
+                out_dir_vec = out_dir_vec + mean_dir_vec
                 out_poses = convert_dir_vec_to_pose(out_dir_vec)
 
                 save_dict = {
                     'sentence': sentence, 'audio': clip_audio.astype(np.float32),
                     'out_dir_vec': out_dir_vec, 'out_poses': out_poses,
-                    'aux_info': '{}_{}_{}'.format(vid, vid_idx, clip_idx),
-                    'human_dir_vec': target_dir_vec + self.config_args.mean_dir_vec,
+                    'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
+                    'human_dir_vec': target_dir_vec + mean_dir_vec,
                 }
                 with open(os.path.join(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
                     pickle.dump(save_dict, f)
                 print('\rRendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
                                                                                          samples_to_generate,
-                                                                                         time.time() - start_time),
+                                                                                         audio_time.time() - start_time),
                       end='')
 
-        end_time = time.time()
+        end_time = audio_time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - overall_start_time))

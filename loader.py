@@ -407,8 +407,8 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         # stds = np.array([std1, std2, std3])
         with open(stats_file, 'wb') as af:
             pickle.dump((max1, min1, max2, min2, max3, min3), af)
-        means = np.array([max1, max2, max3])
-        stds = np.array([min1, min2, min3])
+        max_all = np.array([max1, max2, max3])
+        min_all = np.array([min1, min2, min3])
         print('Successfully saved stats.')
     else:
         train_data_wav = np.load(train_data_wav_file)['arr_0']
@@ -425,13 +425,13 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
 
         with open(stats_file, 'rb') as af:
             stats = pickle.load(af)
-        means = np.array(stats[:3])
-        stds = np.array(stats[4:])
+        max_all = np.array(stats[:3])
+        min_all = np.array(stats[4:])
 
     return train_data_wav, eval_data_wav, test_data_wav, \
         train_labels_cat, eval_labels_cat, test_labels_cat, \
         train_labels_dim, eval_labels_dim, test_labels_dim, \
-        means, stds
+        max_all, min_all
 
 
 class TedDBParams:

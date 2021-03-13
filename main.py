@@ -158,7 +158,7 @@ args.work_dir_s2eg = j(models_s2eg_path, args.dataset_s2eg)
 os.makedirs(args.work_dir_ser, exist_ok=True)
 os.makedirs(args.work_dir_s2eg, exist_ok=True)
 
-args.video_save_path = j(base_path, 'outputs', 'videos')
+args.video_save_path = j(base_path, 'outputs', 'videos_trimodal_style')
 os.makedirs(args.video_save_path, exist_ok=True)
 
 data_loader = dict(train_data_ser=train_data_wav, train_data_s2eg=train_data_ted,
@@ -179,4 +179,8 @@ pr = processor.Processor(args, config_args, data_path, data_loader,
 if args.train_ser or args.train_s2eg:
     pr.train()
 
-pr.generate_motion(samples_to_generate=3000, randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+# pr.generate_motion(samples_to_generate=len(data_loader['test_data_s2eg_wav']),
+#                    randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+
+pr.generate_motion_by_env_file(j(data_path, 'ted_db/lmdb_test'), 5, [5, 12],
+                               randomized=randomized, ser_epoch='best', s2eg_epoch=142)

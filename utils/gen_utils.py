@@ -50,34 +50,44 @@ def time_since(since):
     return '%s' % as_minutes(s)
 
 
-def create_video_and_save(save_path, epoch, prefix, iter_idx, target, output, mean_data, title,
+def create_video_and_save(save_path, epoch, prefix, iter_idx, target, output_trimodal, output, mean_data, title,
                           audio=None, aux_str=None, clipping_to_shortest_stream=False, delete_audio_file=True):
     start = time.time()
 
-    fig = plt.figure(figsize=(8, 4))
-    axes = [fig.add_subplot(1, 2, 1, projection='3d'), fig.add_subplot(1, 2, 2, projection='3d')]
+    fig = plt.figure(figsize=(12, 4))
+    axes = [fig.add_subplot(1, 3, 1, projection='3d'), fig.add_subplot(1, 3, 2, projection='3d'),
+            fig.add_subplot(1, 3, 3, projection='3d')]
     axes[0].view_init(elev=20, azim=-60)
     axes[1].view_init(elev=20, azim=-60)
+    axes[2].view_init(elev=20, azim=-60)
     fig_title = title
 
     if aux_str:
         fig_title += ('\n' + aux_str)
     fig.suptitle('\n'.join(wrap(fig_title, 75)), fontsize='medium')
 
-    # un-normalization and convert to poses
+    # un-normalization output and convert to poses
     mean_data = mean_data.flatten()
+    output_trimodal = output_trimodal + mean_data
+    output_trimodal_poses = ted_db.convert_dir_vec_to_pose(output_trimodal)
+
+    # un-normalization output and convert to poses
+    # mean_data = mean_data.flatten()
     output = output + mean_data
     output_poses = ted_db.convert_dir_vec_to_pose(output)
+
     target_poses = None
     if target is not None:
         target = target + mean_data
         target_poses = ted_db.convert_dir_vec_to_pose(target)
 
     def animate(i):
-        for k, name in enumerate(['human', 'generated']):
+        for k, name in enumerate(['human', 'trimodal', 'ours']):
             if name == 'human' and target is not None and i < len(target):
                 pose = target_poses[i]
-            elif name == 'generated' and i < len(output):
+            elif name == 'trimodal' and i < len(output_trimodal):
+                pose = output_trimodal_poses[i]
+            elif name == 'ours' and i < len(output):
                 pose = output_poses[i]
             else:
                 pose = None
@@ -133,7 +143,7 @@ def create_video_and_save(save_path, epoch, prefix, iter_idx, target, output, me
             os.remove(audio_path)
         os.remove(video_path)
 
-    return output_poses, target_poses
+    return output_trimodal_poses, output_poses, target_poses
 
 
 def save_checkpoint(state, filename):

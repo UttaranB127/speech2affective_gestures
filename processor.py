@@ -1083,12 +1083,19 @@ class Processor(object):
 
                 vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
 
+                out_list_trimodal = []
                 out_list = []
                 n_frames = self.config_args.n_poses
                 clip_length = len(clip_audio) / audio_sr
                 seed_seq = target_dir_vec[0:self.config_args.n_pre_poses]
 
                 # pre seq
+                pre_seq_trimodal = torch.zeros((1, n_frames, self.P + 1))
+                if seed_seq is not None:
+                    pre_seq_trimodal[0, 0:self.config_args.n_pre_poses, :-1] =\
+                        torch.Tensor(seed_seq[0:self.config_args.n_pre_poses])
+                    pre_seq_trimodal[0, 0:self.config_args.n_pre_poses, -1] = 1  # indicating bit for seed poses
+
                 pre_seq = torch.zeros((1, n_frames, self.P + 1))
                 if seed_seq is not None:
                     pre_seq[0, 0:self.config_args.n_pre_poses, :-1] =\
@@ -1121,6 +1128,7 @@ class Processor(object):
                 print('{}, {}, {}, {}, {}'.format(num_subdivisions, unit_time, clip_length, stride_time,
                                                   audio_sample_length))
 
+                out_dir_vec_trimodal = None
                 out_dir_vec = None
                 for sub_div_idx in range(0, num_subdivisions):
                     overall_start_time = sub_div_idx * stride_time
@@ -1159,11 +1167,16 @@ class Processor(object):
 
                     # prepare pre seq
                     if sub_div_idx > 0:
+                        pre_seq_trimodal[0, 0:self.config_args.n_pre_poses, :-1] =\
+                            out_dir_vec_trimodal.squeeze(0)[-self.config_args.n_pre_poses:]
+                        pre_seq_trimodal[0, 0:self.config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
+
                         pre_seq[0, 0:self.config_args.n_pre_poses, :-1] =\
                             out_dir_vec.squeeze(0)[-self.config_args.n_pre_poses:]
                         pre_seq[0, 0:self.config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
+
+                    pre_seq_trimodal = pre_seq_trimodal.float().to(self.device)
                     pre_seq = pre_seq.float().to(self.device)
-                    pre_seq_partial = pre_seq[0, 0:self.config_args.n_pre_poses, :-1].unsqueeze(0)
 
                     mel_spec = ps.logfbank(in_audio_np, audio_fr, nfilt=fft_filter_num, nfft=2048)
                     delta1 = ps.delta(mel_spec, 2)
@@ -1214,10 +1227,25 @@ class Processor(object):
                           format(sub_div_idx + 1, num_subdivisions,
                                  cmn.emotions_names_07_cats[torch.where(test_labels_oh)[1][0].item()]))
 
+                    out_dir_vec_trimodal, *_ = self.s2eg_generator(pre_seq_trimodal, in_text_padded, in_audio, vid_idx)
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
+                    out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
 
                     # smoothing motion transition
+                    if len(out_list_trimodal) > 0:
+                        last_poses = out_list_trimodal[-1][-self.config_args.n_pre_poses:]
+                        # delete last 4 frames
+                        out_list_trimodal[-1] = out_list_trimodal[-1][:-self.config_args.n_pre_poses]
+
+                        for j in range(len(last_poses)):
+                            n = len(last_poses)
+                            prev_pose = last_poses[j]
+                            next_pose = out_seq_trimodal[j]
+                            out_seq_trimodal[j] = prev_pose * (n - j) / (n + 1) + next_pose * (j + 1) / (n + 1)
+
+                    out_list_trimodal.append(out_seq_trimodal)
+
                     if len(out_list) > 0:
                         last_poses = out_list[-1][-self.config_args.n_pre_poses:]
                         out_list[-1] = out_list[-1][:-self.config_args.n_pre_poses]  # delete last 4 frames
@@ -1231,9 +1259,22 @@ class Processor(object):
                     out_list.append(out_seq)
 
                 # aggregate results
+                out_dir_vec_trimodal = np.vstack(out_list_trimodal)
                 out_dir_vec = np.vstack(out_list)
+
                 # fade out to the mean pose
                 if fade_out:
+                    n_smooth = self.config_args.n_pre_poses
+                    start_frame = len(out_dir_vec_trimodal) -\
+                        int(end_padding_duration / audio_sr * self.config_args.motion_resampling_framerate)
+                    end_frame = start_frame + n_smooth * 2
+                    if len(out_dir_vec_trimodal) < end_frame:
+                        out_dir_vec_trimodal = np.pad(out_dir_vec_trimodal,
+                                                      [(0, end_frame - len(out_dir_vec_trimodal)), (0, 0)],
+                                                      mode='constant')
+                    out_dir_vec_trimodal[end_frame - n_smooth:] =\
+                        np.zeros(self.P)  # fade out to mean poses
+
                     n_smooth = self.config_args.n_pre_poses
                     start_frame = len(out_dir_vec) -\
                         int(end_padding_duration / audio_sr * self.config_args.motion_resampling_framerate)
@@ -1244,16 +1285,24 @@ class Processor(object):
                         np.zeros(self.P)  # fade out to mean poses
 
                     # interpolation
+                    y_trimodal = out_dir_vec_trimodal[start_frame:end_frame]
                     y = out_dir_vec[start_frame:end_frame]
                     x = np.array(range(0, y.shape[0]))
                     w = np.ones(len(y))
                     w[0] = 5
                     w[-1] = 5
+
+                    co_effs_trimodal = np.polyfit(x, y_trimodal, 2, w=w)
+                    fit_functions_trimodal = [np.poly1d(co_effs_trimodal[:, k]) for k in range(0, y_trimodal.shape[1])]
+                    interpolated_y_trimodal = [fit_functions_trimodal[k](x) for k in range(0, y_trimodal.shape[1])]
+                    interpolated_y_trimodal = np.transpose(np.asarray(interpolated_y_trimodal))  # (num_frames x dims)
+
                     co_effs = np.polyfit(x, y, 2, w=w)
                     fit_functions = [np.poly1d(co_effs[:, k]) for k in range(0, y.shape[1])]
                     interpolated_y = [fit_functions[k](x) for k in range(0, y.shape[1])]
                     interpolated_y = np.transpose(np.asarray(interpolated_y))  # (num_frames x dims)
 
+                    out_dir_vec_trimodal[start_frame:end_frame] = interpolated_y_trimodal
                     out_dir_vec[start_frame:end_frame] = interpolated_y
 
                 # make a video
@@ -1268,9 +1317,22 @@ class Processor(object):
                                                      str(datetime.timedelta(seconds=clip_time[1])))
                 create_video_and_save(
                     self.args.video_save_path, 0, filename_prefix_for_video, 0, target_dir_vec,
-                    out_dir_vec, out_dir_vec, mean_dir_vec, sentence,
+                    out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
                     audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
                     delete_audio_file=False)
+
+                # save pkl
+                out_dir_vec_trimodal = out_dir_vec_trimodal + mean_dir_vec
+                out_poses_trimodal = convert_dir_vec_to_pose(out_dir_vec_trimodal)
+
+                save_dict = {
+                    'sentence': sentence, 'audio': clip_audio.astype(np.float32),
+                    'out_dir_vec': out_dir_vec_trimodal, 'out_poses': out_poses_trimodal,
+                    'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
+                    'human_dir_vec': target_dir_vec + mean_dir_vec,
+                }
+                with open(j(self.args.video_save_path, '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
+                    pickle.dump(save_dict, f)
 
                 # save pkl
                 out_dir_vec = out_dir_vec + mean_dir_vec
@@ -1282,7 +1344,7 @@ class Processor(object):
                     'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
                     'human_dir_vec': target_dir_vec + mean_dir_vec,
                 }
-                with open(os.path.join(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
+                with open(j(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
                     pickle.dump(save_dict, f)
                 print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
                                                                                        samples_to_generate,

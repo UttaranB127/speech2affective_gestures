@@ -1102,9 +1102,9 @@ class Processor(object):
                 stride_time = (self.config_args.n_poses - self.config_args.n_pre_poses) /\
                     self.config_args.motion_resampling_framerate
                 if clip_length < unit_time:
-                    num_subdivision = 1
+                    num_subdivisions = 1
                 else:
-                    num_subdivision = math.ceil((clip_length - unit_time) / stride_time) + 1
+                    num_subdivisions = math.ceil((clip_length - unit_time) / stride_time) + 1
                 spectrogram_sample_length = int(round(unit_time * audio_sr / 512))
                 audio_sample_length = int(unit_time * audio_sr)
                 end_padding_duration = 0
@@ -1118,12 +1118,12 @@ class Processor(object):
                 else:
                     vid_idx = None
 
-                print('{}, {}, {}, {}, {}'.format(num_subdivision, unit_time, clip_length, stride_time,
+                print('{}, {}, {}, {}, {}'.format(num_subdivisions, unit_time, clip_length, stride_time,
                                                   audio_sample_length))
 
                 out_dir_vec = None
-                for i in range(0, num_subdivision):
-                    overall_start_time = i * stride_time
+                for sub_div_idx in range(0, num_subdivisions):
+                    overall_start_time = sub_div_idx * stride_time
                     end_time = overall_start_time + unit_time
 
                     # prepare spectrogram input
@@ -1134,7 +1134,7 @@ class Processor(object):
                     audio_end = audio_start + audio_sample_length
                     in_audio_np = clip_audio[audio_start:audio_end]
                     if len(in_audio_np) < audio_sample_length:
-                        if i == num_subdivision - 1:
+                        if sub_div_idx == num_subdivisions - 1:
                             end_padding_duration = audio_sample_length - len(in_audio_np)
                         in_audio_np = np.pad(in_audio_np, (0, audio_sample_length - len(in_audio_np)), 'constant')
                     in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
@@ -1158,7 +1158,7 @@ class Processor(object):
                     in_text = torch.LongTensor(word_indices).unsqueeze(0).to(self.device)
 
                     # prepare pre seq
-                    if i > 0:
+                    if sub_div_idx > 0:
                         pre_seq[0, 0:self.config_args.n_pre_poses, :-1] =\
                             out_dir_vec.squeeze(0)[-self.config_args.n_pre_poses:]
                         pre_seq[0, 0:self.config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
@@ -1210,8 +1210,9 @@ class Processor(object):
                          self.data_loader['ted_wav_min_all'][None, :, None, None])).float().to(self.device)
 
                     _, _, test_labels_oh = self.forward_pass_ser(data_wav)
-                    print('Subdivision: {:02d}. Predicted speech emotion: {}.'.
-                          format(i, cmn.emotions_names_07_cats[torch.where(test_labels_oh)[1][0].item()]))
+                    print('Subdivision: {} of {}. Predicted speech emotion: {}.'.
+                          format(sub_div_idx + 1, num_subdivisions,
+                                 cmn.emotions_names_07_cats[torch.where(test_labels_oh)[1][0].item()]))
 
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()

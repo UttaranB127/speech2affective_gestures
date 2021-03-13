@@ -13,7 +13,7 @@ import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 
-from os.path import join as j
+from os.path import join as jn
 from torchlight.torchlight.io import IO
 
 import utils.common as cmn
@@ -267,7 +267,7 @@ class Processor(object):
                 get_epoch_and_loss(work_dir, 's2eg', emo_as_cats=self.args.emo_as_cats, epoch=epoch)
         model_found = False
         try:
-            loaded_vars = torch.load(j(work_dir, model_name))
+            loaded_vars = torch.load(jn(work_dir, model_name))
             if phase == 'ser':
                 self.ser_model.load_state_dict(loaded_vars['ser_model_dict'])
             elif phase == 's2eg':
@@ -942,8 +942,8 @@ class Processor(object):
                 # save model and weights
                 if self.ser_accu_updated or (epoch % self.args.save_interval == 0 and epoch > self.min_train_epochs):
                     torch.save({'ser_model_dict': self.ser_model.state_dict()},
-                               j(self.args.work_dir_ser, 'epoch_{}_accu_{:.4f}_loss_{:.4f}_model.pth.tar'.
-                                 format(epoch, self.epoch_info['mean_ser_accu'], self.epoch_info['mean_ser_loss'])))
+                               jn(self.args.work_dir_ser, 'epoch_{}_accu_{:.4f}_loss_{:.4f}_model.pth.tar'.
+                                  format(epoch, self.epoch_info['mean_ser_accu'], self.epoch_info['mean_ser_loss'])))
 
         if self.args.train_s2eg:
             if self.args.s2eg_load_last_best:
@@ -978,8 +978,8 @@ class Processor(object):
                 if self.s2eg_loss_updated or (epoch % self.args.save_interval == 0 and epoch > self.min_train_epochs):
                     torch.save({'gen_model_dict': self.s2eg_generator.state_dict(),
                                 'dis_model_dict': self.s2eg_discriminator.state_dict()},
-                               j(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
-                                 format(epoch, self.epoch_info['mean_s2eg_loss'])))
+                               jn(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
+                                  format(epoch, self.epoch_info['mean_s2eg_loss'])))
 
     def generate_motion(self, samples_to_generate=10, randomized=True,
                         load_saved_model=True, ser_epoch='best', s2eg_epoch='best'):
@@ -1332,7 +1332,7 @@ class Processor(object):
                     'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
                     'human_dir_vec': target_dir_vec + mean_dir_vec,
                 }
-                with open(j(self.args.video_save_path, '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
+                with open(jn(self.args.video_save_path, '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
                     pickle.dump(save_dict, f)
 
                 # save pkl
@@ -1345,7 +1345,7 @@ class Processor(object):
                     'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
                     'human_dir_vec': target_dir_vec + mean_dir_vec,
                 }
-                with open(j(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
+                with open(jn(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
                     pickle.dump(save_dict, f)
                 print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
                                                                                        samples_to_generate,

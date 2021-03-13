@@ -1210,8 +1210,8 @@ class Processor(object):
                          self.data_loader['ted_wav_min_all'][None, :, None, None])).float().to(self.device)
 
                     _, _, test_labels_oh = self.forward_pass_ser(data_wav)
-                    print('Subdivision: {:02d}. Predicted speech emotion: {}'.
-                          format(i, cmn.emotions_names_07_cats[np.where(test_labels_oh)[0]]))
+                    print('Subdivision: {:02d}. Predicted speech emotion: {}.'.
+                          format(i, cmn.emotions_names_07_cats[torch.where(test_labels_oh)[1][0].item()]))
 
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
@@ -1283,10 +1283,9 @@ class Processor(object):
                 }
                 with open(os.path.join(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
                     pickle.dump(save_dict, f)
-                print('\rRendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
-                                                                                         samples_to_generate,
-                                                                                         audio_time.time() - start_time),
-                      end='')
+                print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
+                                                                                       samples_to_generate,
+                                                                                       time.time() - start_time))
 
-        end_time = audio_time.time()
+        end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - overall_start_time))

@@ -1227,7 +1227,8 @@ class Processor(object):
                           format(sub_div_idx + 1, num_subdivisions,
                                  cmn.emotions_names_07_cats[torch.where(test_labels_oh)[1][0].item()]))
 
-                    out_dir_vec_trimodal, *_ = self.s2eg_generator(pre_seq_trimodal, in_text_padded, in_audio, vid_idx)
+                    out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq_trimodal,
+                                                                       in_text_padded, in_audio, vid_idx)
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
                     out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()

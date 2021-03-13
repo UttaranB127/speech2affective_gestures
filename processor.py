@@ -1064,7 +1064,7 @@ class Processor(object):
                                                self.config_args.motion_resampling_framerate)
                 target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses)
                 target_dir_vec = target_dir_vec.reshape(target_dir_vec.shape[0], -1)
-                target_dir_vec -= self.config_args.mean_dir_vecs
+                target_dir_vec -= self.config_args.mean_dir_vec
 
                 # check duration
                 clip_duration = clip_time[1] - clip_time[0]

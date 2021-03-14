@@ -1024,6 +1024,10 @@ class Processor(object):
         self.s2eg_discriminator.eval()
         self.feature_extractor.eval()
         batch_size = 64
+        feature_size = self.feature_extractor.pose_encoder.out_net._modules['6'].out_features
+        features_target = np.zeros((samples_to_generate, feature_size))
+        features_trimodal = np.zeros((samples_to_generate, feature_size))
+        features_s2eg = np.zeros((samples_to_generate, feature_size))
 
         start_time = time.time()
         for sample_idx in np.arange(0, samples_to_generate, batch_size):
@@ -1041,6 +1045,15 @@ class Processor(object):
                                                              target_seq=target_seq, words=words, aux_info=aux_info,
                                                              save_path=self.args.video_save_path,
                                                              make_video=False, compute_features=True)
+                start_idx = sample_idx * batch_size
+                end_idx = min(samples_to_generate, sample_idx * (batch_size + 1))
+                features_target[start_idx:end_idx] = features[0].detach().cpu().numpy()
+                features_trimodal[start_idx:end_idx] = features[1].detach().cpu().numpy()
+                features_s2eg[start_idx:end_idx] = features[2].detach().cpu().numpy()
+        np.savez_compressed('outputs/features.npz',
+                            features_target=features_target,
+                            features_trimodal=features_trimodal,
+                            features_s2eg=features_s2eg)
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 
@@ -1282,7 +1295,7 @@ class Processor(object):
                     _, _, _, feature_s2eg, _, _, _ =\
                         self.feature_extractor(None, None, None, out_dir_vec, None,
                                                variational_encoding=variational_encoding)
-                    diff = torch.norm(feature_trimodal - feature_s2eg) - torch.norm(feature_trimodal - feature_target)
+                    diff = torch.norm(feature_target - feature_s2eg) - torch.norm(feature_target - feature_trimodal)
                     print(' Feature diff: {:.4f}'.format(diff.item()))
 
                     out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()

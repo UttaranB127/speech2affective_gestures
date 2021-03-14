@@ -1045,11 +1045,10 @@ class Processor(object):
                                                              target_seq=target_seq, words=words, aux_info=aux_info,
                                                              save_path=self.args.video_save_path,
                                                              make_video=False, compute_features=True)
-                start_idx = sample_idx * batch_size
-                end_idx = min(samples_to_generate, sample_idx * (batch_size + 1))
-                features_target[start_idx:end_idx] = features[0].detach().cpu().numpy()
-                features_trimodal[start_idx:end_idx] = features[1].detach().cpu().numpy()
-                features_s2eg[start_idx:end_idx] = features[2].detach().cpu().numpy()
+                end_idx = min(samples_to_generate, sample_idx + batch_size)
+                features_target[sample_idx:end_idx] = features[0].detach().cpu().numpy()
+                features_trimodal[sample_idx:end_idx] = features[1].detach().cpu().numpy()
+                features_s2eg[sample_idx:end_idx] = features[2].detach().cpu().numpy()
         np.savez_compressed('outputs/features.npz',
                             features_target=features_target,
                             features_trimodal=features_trimodal,

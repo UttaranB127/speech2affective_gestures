@@ -1245,7 +1245,7 @@ class Processor(object):
                     _, _, test_labels_oh = self.forward_pass_ser(data_wav)
                     print('Subdivision: {} of {}. Predicted speech emotion: {}.'.
                           format(sub_div_idx + 1, num_subdivisions,
-                                 cmn.emotions_names_07_cats[torch.where(test_labels_oh)[1][0].item()]))
+                                 cmn.emotions_names_07_cats[torch.where(test_labels_oh)[1][0].item()]), end='')
 
                     out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq_trimodal,
                                                                        in_text_padded, in_audio, vid_idx)
@@ -1260,6 +1260,8 @@ class Processor(object):
                     _, _, _, feature_s2eg, _, _, _ =\
                         self.feature_extractor(None, None, None, out_dir_vec, None,
                                                variational_encoding=variational_encoding)
+                    diff = torch.norm(feature_trimodal - feature_s2eg) - torch.norm(feature_trimodal - feature_target)
+                    print(' Feature diff: {:.4f}'.format(diff.item()))
 
                     out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()

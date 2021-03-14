@@ -1003,6 +1003,7 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
+        self.feature_extractor.eval()
         batch_size = 64
 
         start_time = time.time()
@@ -1048,6 +1049,7 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
+        self.feature_extractor.eval()
         batch_size = 64
         mean_dir_vec = np.squeeze(np.array(self.config_args.mean_dir_vec))
 
@@ -1080,6 +1082,7 @@ class Processor(object):
                 target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses)
                 target_dir_vec = target_dir_vec.reshape(target_dir_vec.shape[0], -1)
                 target_dir_vec -= mean_dir_vec
+                n_frames_total = len(target_dir_vec)
 
                 # check duration
                 clip_duration = clip_time[1] - clip_time[0]
@@ -1111,6 +1114,9 @@ class Processor(object):
                     pre_seq[0, 0:self.config_args.n_pre_poses, :-1] =\
                         torch.Tensor(seed_seq[0:self.config_args.n_pre_poses])
                     pre_seq[0, 0:self.config_args.n_pre_poses, -1] = 1  # indicating bit for seed poses
+
+                # target seq
+                target_seq = torch.from_numpy(target_dir_vec[0:n_frames]).unsqueeze(0).float().to(self.device)
 
                 spectrogram = None
 
@@ -1175,8 +1181,12 @@ class Processor(object):
                     in_text_padded = torch.LongTensor(extended_word_indices).unsqueeze(0).to(self.device)
                     in_text = torch.LongTensor(word_indices).unsqueeze(0).to(self.device)
 
-                    # prepare pre seq
+                    # prepare target seq and pre seq
                     if sub_div_idx > 0:
+                        target_seq = torch.from_numpy(
+                            target_dir_vec[n_frames * sub_div_idx:min(n_frames_total, n_frames * (sub_div_idx + 1))])\
+                            .unsqueeze(0).float().to(self.device)
+
                         pre_seq_trimodal[0, 0:self.config_args.n_pre_poses, :-1] =\
                             out_dir_vec_trimodal.squeeze(0)[-self.config_args.n_pre_poses:]
                         pre_seq_trimodal[0, 0:self.config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
@@ -1242,7 +1252,7 @@ class Processor(object):
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
 
                     _, _, _, feature_target, _, _, _ =\
-                        self.feature_extractor(None, None, None, target_dir_vec, None,
+                        self.feature_extractor(None, None, None, target_seq, None,
                                                variational_encoding=variational_encoding)
                     _, _, _, feature_trimodal, _, _, _ =\
                         self.feature_extractor(None, None, None, out_dir_vec_trimodal, None,

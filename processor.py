@@ -782,7 +782,11 @@ class Processor(object):
         loss_dict['total_loss'] = 0.
         for loss in loss_dict.keys():
             loss_dict['total_loss'] += loss_dict[loss]
-        return loss_dict, [features_target, features_trimodal, features_s2eg]
+        return loss_dict,\
+            [convert_dir_vec_to_pose(target_seq),
+             convert_dir_vec_to_pose(out_dir_vec_trimodal),
+             convert_dir_vec_to_pose(out_dir_vec)],\
+            [features_target, features_trimodal, features_s2eg]
 
     def per_train(self):
 
@@ -826,8 +830,8 @@ class Processor(object):
             if self.args.train_s2eg:
                 self.s2eg_generator.train()
                 self.s2eg_discriminator.train()
-                loss_dict, _ = self.forward_pass_s2eg(extended_word_seq, audio, train_labels_oh,
-                                                      vec_seq, vid_indices, train=True)
+                loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, train_labels_oh,
+                                                       vec_seq, vid_indices, train=True)
                 # Compute statistics
                 batch_s2eg_loss += loss_dict['total_loss']
 
@@ -891,8 +895,8 @@ class Processor(object):
                 self.s2eg_generator.eval()
                 self.s2eg_discriminator.eval()
                 with torch.no_grad():
-                    loss_dict, _ = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
-                                                          vec_seq, vid_indices, train=False)
+                    loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
+                                                           vec_seq, vid_indices, train=False)
                     # Compute statistics
                     batch_s2eg_loss += loss_dict['total_loss']
 
@@ -1024,6 +1028,11 @@ class Processor(object):
         self.s2eg_discriminator.eval()
         self.feature_extractor.eval()
         batch_size = 64
+
+        poses_target = np.zeros((samples_to_generate, self.T, self.P))
+        poses_trimodal = np.zeros((samples_to_generate, self.T, self.P))
+        poses_s2eg = np.zeros((samples_to_generate, self.T, self.P))
+
         feature_size = self.feature_extractor.pose_encoder.out_net._modules['6'].out_features
         features_target = np.zeros((samples_to_generate, feature_size))
         features_trimodal = np.zeros((samples_to_generate, feature_size))
@@ -1040,16 +1049,27 @@ class Processor(object):
                 ser_loss, test_labels_pred, test_labels_oh = \
                     self.forward_pass_ser(test_data_wav,
                                           test_labels_cat if self.args.emo_as_cats else test_labels_dim)
-                loss_dict, features = self.forward_pass_s2eg(extended_word_seq, audio, test_labels_oh,
-                                                             vec_seq, vid_indices, train=False,
-                                                             target_seq=target_seq, words=words, aux_info=aux_info,
-                                                             save_path=self.args.video_save_path,
-                                                             make_video=False, compute_features=True)
+                loss_dict, poses, features =\
+                    self.forward_pass_s2eg(extended_word_seq, audio, test_labels_oh,
+                                           vec_seq, vid_indices, train=False,
+                                           target_seq=target_seq, words=words, aux_info=aux_info,
+                                           save_path=self.args.video_save_path,
+                                           make_video=False, compute_features=True)
                 end_idx = min(samples_to_generate, sample_idx + batch_size)
+
+                poses_target[sample_idx:end_idx] = poses[0].detach().cpu().numpy()
+                poses_trimodal[sample_idx:end_idx] = poses[1].detach().cpu().numpy()
+                poses_s2eg[sample_idx:end_idx] = poses[2].detach().cpu().numpy()
+
                 features_target[sample_idx:end_idx] = features[0].detach().cpu().numpy()
                 features_trimodal[sample_idx:end_idx] = features[1].detach().cpu().numpy()
                 features_s2eg[sample_idx:end_idx] = features[2].detach().cpu().numpy()
-        np.savez_compressed('outputs/features.npz',
+        np.savez_compressed(jn(self.args.quantitative_save_path, 'poses.npz'),
+                            poses_target=poses_target,
+                            poses_trimodal=poses_trimodal,
+                            poses_s2eg=poses_s2eg)
+
+        np.savez_compressed(jn(self.args.quantitative_save_path, 'features.npz'),
                             features_target=features_target,
                             features_trimodal=features_trimodal,
                             features_s2eg=features_s2eg)

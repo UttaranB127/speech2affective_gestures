@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+import net.embedding_net as en
 import utils.ted_db_utils as ted_db
 # import net.embedding_net as embedding_net
 
@@ -58,8 +59,8 @@ class TextEncoderTCN(nn.Module):
         self.decoder.bias.data.fill_(0)
         self.decoder.weight.data.normal_(0, 0.01)
 
-    def forward(self, input):
-        emb = self.drop(self.embedding(input))
+    def forward(self, in_data):
+        emb = self.drop(self.embedding(in_data))
         y = self.tcn(emb.transpose(1, 2)).transpose(1, 2)
         y = self.decoder(y)
         return y.contiguous(), 0
@@ -111,12 +112,6 @@ class PoseGeneratorTriModal(nn.Module):
         if torch.cuda.device_count() > 1:
             self.do_flatten_parameters = True
 
-    @staticmethod
-    def re_parametrize(mu, log_var):
-        std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
     def forward(self, pre_seq, in_text, in_audio, vid_indices=None):
         decoder_hidden = None
         if self.do_flatten_parameters:
@@ -138,7 +133,7 @@ class PoseGeneratorTriModal(nn.Module):
                 z_context = self.speaker_embedding(vid_indices)
                 z_mu = self.speaker_mu(z_context)
                 z_log_var = self.speaker_log_var(z_context)
-                z_context = PoseGeneratorTriModal.re_parametrize(z_mu, z_log_var)
+                z_context = en.re_parametrize(z_mu, z_log_var)
             else:
                 z_mu = z_log_var = None
                 z_context = torch.randn(in_text.shape[0], self.z_size, device=in_text.device)
@@ -309,12 +304,6 @@ class PoseGenerator(nn.Module):
         if torch.cuda.device_count() > 1:
             self.do_flatten_parameters = True
 
-    @staticmethod
-    def re_parametrize(mu, log_var):
-        std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
     def forward(self, pre_seq, in_text, in_audio, in_emo_labels, vid_indices=None):
         decoder_hidden = None
         if self.do_flatten_parameters:
@@ -336,7 +325,7 @@ class PoseGenerator(nn.Module):
                 z_context = self.speaker_embedding(vid_indices)
                 z_mu = self.speaker_mu(z_context)
                 z_log_var = self.speaker_log_var(z_context)
-                z_context = PoseGenerator.re_parametrize(z_mu, z_log_var)
+                z_context = en.re_parametrize(z_mu, z_log_var)
             else:
                 z_mu = z_log_var = None
                 z_context = torch.randn(in_text.shape[0], self.z_size, device=in_text.device)

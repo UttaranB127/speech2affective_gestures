@@ -18,6 +18,7 @@ from torchlight.torchlight.io import IO
 
 import utils.common as cmn
 
+from net.embedding_net import EmbeddingNet
 from net.ser_att_conv_rnn import AttConvRNN
 from net.multimodal_context_net import PoseGeneratorTriModal as PGT, ConvDiscriminatorTriModal as CDT
 from net.multimodal_context_net import PoseGenerator, AffDiscriminator
@@ -183,6 +184,8 @@ class Processor(object):
                                                 z_obj=self.train_speaker_model,
                                                 pose_dim=self.P)
             self.s2eg_discriminator = AffDiscriminator(self.P, self.EC if self.args.emo_as_cats else self.ED)
+            self.feature_extractor = EmbeddingNet(self.config_args, self.P, self.config_args.n_poses,
+                                                  None, None, None, mode='pose')
         else:
             lang_model, self.train_speaker_model,\
                 self.eval_speaker_model, self.test_speaker_model,\
@@ -198,12 +201,14 @@ class Processor(object):
                 self.trimodal_discriminator = nn.DataParallel(self.trimodal_discriminator)
                 self.s2eg_generator = nn.DataParallel(self.s2eg_generator)
                 self.s2eg_discriminator = nn.DataParallel(self.s2eg_discriminator)
-        self.ser_model.to(torch.cuda.current_device())
+                self.feature_extractor = nn.DataParallel(self.feature_extractor)
+        self.ser_model.to(self.device)
         if not self.args.train_ser:
-            self.trimodal_generator.to(torch.cuda.current_device())
-            self.trimodal_discriminator.to(torch.cuda.current_device())
-            self.s2eg_generator.to(torch.cuda.current_device())
-            self.s2eg_discriminator.to(torch.cuda.current_device())
+            self.trimodal_generator.to(self.device)
+            self.trimodal_discriminator.to(self.device)
+            self.s2eg_generator.to(self.device)
+            self.s2eg_discriminator.to(self.device)
+            self.feature_extractor.to(self.device)
         self.conv2_weights = []
 
         if self.args.train_ser:
@@ -247,11 +252,11 @@ class Processor(object):
                 betas=(0.5, 0.999))
 
     def process_data(self, data, poses, quat, trans, affs):
-        data = data.float().cuda()
-        poses = poses.float().cuda()
-        quat = quat.float().cuda()
-        trans = trans.float().cuda()
-        affs = affs.float().cuda()
+        data = data.float().to(self.device)
+        poses = poses.float().to(self.device)
+        quat = quat.float().to(self.device)
+        trans = trans.float().to(self.device)
+        affs = affs.float().to(self.device)
         return data, poses, quat, trans, affs
 
     def load_model_at_epoch(self, phase, epoch='best'):
@@ -334,18 +339,18 @@ class Processor(object):
         return sum(p.numel() for p in self.ser_model.parameters() if p.requires_grad)
 
     def yield_batch(self, train):
-        batch_data_ser = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).cuda()
-        batch_data_s2eg = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).cuda()
-        batch_labels_cat = torch.zeros(self.args.batch_size).long().cuda()
-        batch_labels_dim = torch.zeros((self.args.batch_size, self.ED)).float().cuda()
-        batch_word_seq_tensor = torch.zeros((self.args.batch_size, self.T)).long().cuda()
-        batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().cuda()
-        batch_extended_word_seq = torch.zeros((self.args.batch_size, self.T)).long().cuda()
-        batch_pose_seq = torch.zeros((self.args.batch_size, self.T, self.P + self.C)).float().cuda()
-        batch_vec_seq = torch.zeros((self.args.batch_size, self.T, self.P)).float().cuda()
-        batch_audio = torch.zeros((self.args.batch_size, 36267)).float().cuda()
-        batch_spectrogram = torch.zeros((self.args.batch_size, 128, 70)).float().cuda()
-        batch_vid_indices = torch.zeros(self.args.batch_size).long().cuda()
+        batch_data_ser = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).to(self.device)
+        batch_data_s2eg = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).to(self.device)
+        batch_labels_cat = torch.zeros(self.args.batch_size).long().to(self.device)
+        batch_labels_dim = torch.zeros((self.args.batch_size, self.ED)).float().to(self.device)
+        batch_word_seq_tensor = torch.zeros((self.args.batch_size, self.T)).long().to(self.device)
+        batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().to(self.device)
+        batch_extended_word_seq = torch.zeros((self.args.batch_size, self.T)).long().to(self.device)
+        batch_pose_seq = torch.zeros((self.args.batch_size, self.T, self.P + self.C)).float().to(self.device)
+        batch_vec_seq = torch.zeros((self.args.batch_size, self.T, self.P)).float().to(self.device)
+        batch_audio = torch.zeros((self.args.batch_size, 36267)).float().to(self.device)
+        batch_spectrogram = torch.zeros((self.args.batch_size, 128, 70)).float().to(self.device)
+        batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
 
         if train:
             data_ser_np = self.data_loader['train_data_ser']
@@ -480,21 +485,21 @@ class Processor(object):
             else:
                 rand_keys = np.arange(batch_size)
 
-        batch_data_ser = torch.zeros((batch_size, self.C, self.H, self.W)).cuda()
-        batch_data_s2eg = torch.zeros((batch_size, self.C, self.H, self.W)).cuda()
-        batch_labels_cat = torch.zeros(batch_size).long().cuda()
-        batch_labels_dim = torch.zeros((batch_size, self.ED)).float().cuda()
+        batch_data_ser = torch.zeros((batch_size, self.C, self.H, self.W)).to(self.device)
+        batch_data_s2eg = torch.zeros((batch_size, self.C, self.H, self.W)).to(self.device)
+        batch_labels_cat = torch.zeros(batch_size).long().to(self.device)
+        batch_labels_dim = torch.zeros((batch_size, self.ED)).float().to(self.device)
         batch_words = [[] for _ in range(batch_size)]
         batch_aux_info = [[] for _ in range(batch_size)]
-        batch_word_seq_tensor = torch.zeros((batch_size, self.T)).long().cuda()
-        batch_word_seq_lengths = torch.zeros(batch_size).long().cuda()
-        batch_extended_word_seq = torch.zeros((batch_size, self.T)).long().cuda()
-        batch_pose_seq = torch.zeros((batch_size, self.T, self.P + self.C)).float().cuda()
-        batch_vec_seq = torch.zeros((batch_size, self.T, self.P)).float().cuda()
-        batch_target_seq = torch.zeros((batch_size, self.T, self.P)).float().cuda()
-        batch_audio = torch.zeros((batch_size, 36267)).float().cuda()
-        batch_spectrogram = torch.zeros((batch_size, 128, 70)).float().cuda()
-        batch_vid_indices = torch.zeros(batch_size).long().cuda()
+        batch_word_seq_tensor = torch.zeros((batch_size, self.T)).long().to(self.device)
+        batch_word_seq_lengths = torch.zeros(batch_size).long().to(self.device)
+        batch_extended_word_seq = torch.zeros((batch_size, self.T)).long().to(self.device)
+        batch_pose_seq = torch.zeros((batch_size, self.T, self.P + self.C)).float().to(self.device)
+        batch_vec_seq = torch.zeros((batch_size, self.T, self.P)).float().to(self.device)
+        batch_target_seq = torch.zeros((batch_size, self.T, self.P)).float().to(self.device)
+        batch_audio = torch.zeros((batch_size, 36267)).float().to(self.device)
+        batch_spectrogram = torch.zeros((batch_size, 128, 70)).float().to(self.device)
+        batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 
         def extend_word_seq(lang, words, end_time=None):
             n_frames = data_s2eg.n_poses
@@ -609,7 +614,7 @@ class Processor(object):
                                                           self.pred_loss_func(labels_pred_diff,
                                                                               labels_gt[1:] - labels_gt[:-1]))) * 1.)
             max_idx = torch.argmax(labels_pred, -1, keepdim=True)
-            labels_one_hot = torch.FloatTensor(labels_pred.shape).cuda()
+            labels_one_hot = torch.FloatTensor(labels_pred.shape).to(self.device)
             labels_one_hot.zero_()
             labels_one_hot.scatter_(1, max_idx, 1)
         return total_loss, torch.argmax(labels_pred, dim=-1) if self.args.emo_as_cats else labels_pred, labels_one_hot
@@ -991,6 +996,8 @@ class Processor(object):
             assert s2eg_model_found, print('Speech to emotive gestures model not found')
             trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
+            feature_extractor_checkpoint = torch.load('outputs/feature_extractor.pth.tar')
+            self.feature_extractor.load_state_dict(feature_extractor_checkpoint['feature_extractor_dict'])
 
         self.ser_model.eval()
         self.trimodal_generator.eval()
@@ -1021,7 +1028,8 @@ class Processor(object):
                                     clip_duration_range=None, audio_fr=44100,
                                     fft_filter_num=40, audio_block_size=300,
                                     audio_sr=16000, randomized=True, fade_out=False,
-                                    load_saved_model=True, ser_epoch='best', s2eg_epoch='best'):
+                                    variational_encoding=False, load_saved_model=True,
+                                    ser_epoch='best', s2eg_epoch='best'):
 
         if clip_duration_range is None:
             clip_duration_range = [5, 12]
@@ -1033,6 +1041,8 @@ class Processor(object):
             assert s2eg_model_found, print('Speech to emotive gestures model not found')
             trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
+            feature_extractor_checkpoint = torch.load('outputs/feature_extractor.pth.tar')
+            self.feature_extractor.load_state_dict(feature_extractor_checkpoint['feature_extractor_dict'])
 
         self.ser_model.eval()
         self.trimodal_generator.eval()
@@ -1230,6 +1240,17 @@ class Processor(object):
                     out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq_trimodal,
                                                                        in_text_padded, in_audio, vid_idx)
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
+
+                    _, _, _, feature_target, _, _, _ =\
+                        self.feature_extractor(None, None, None, target_dir_vec, None,
+                                               variational_encoding=variational_encoding)
+                    _, _, _, feature_trimodal, _, _, _ =\
+                        self.feature_extractor(None, None, None, out_dir_vec_trimodal, None,
+                                               variational_encoding=variational_encoding)
+                    _, _, _, feature_s2eg, _, _, _ =\
+                        self.feature_extractor(None, None, None, out_dir_vec, None,
+                                               variational_encoding=variational_encoding)
+
                     out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
 

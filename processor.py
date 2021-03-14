@@ -625,7 +625,8 @@ class Processor(object):
         return data + noise
 
     def forward_pass_s2eg(self, in_text, in_audio, in_emo_labels, target_poses, vid_indices, train,
-                          target_seq=None, words=None, aux_info=None, save_path=None, make_video=False):
+                          target_seq=None, words=None, aux_info=None, save_path=None, make_video=False,
+                          compute_features=False, variational_encoding=False):
         warm_up_epochs = self.config_args.loss_warmup
         use_noisy_target = False
 
@@ -702,6 +703,24 @@ class Processor(object):
                                                                                          time.time() - start_time),
                       end='')
             print()
+
+        # compute diffs
+        assert not compute_features or (compute_features and target_seq is not None), \
+            'target_seq cannot be None when compute_diffs is True'
+        if compute_features:
+            _, _, _, features_target, _, _, _ = \
+                self.feature_extractor(None, None, None, target_seq, None,
+                                       variational_encoding=variational_encoding)
+            _, _, _, features_trimodal, _, _, _ = \
+                self.feature_extractor(None, None, None, out_dir_vec_trimodal, None,
+                                       variational_encoding=variational_encoding)
+            _, _, _, features_s2eg, _, _, _ = \
+                self.feature_extractor(None, None, None, out_dir_vec, None,
+                                       variational_encoding=variational_encoding)
+
+        else:
+            features_target = features_trimodal = features_s2eg = None
+
         # loss
         beta = 0.1
         huber_loss = F.smooth_l1_loss(out_dir_vec / beta, target_poses / beta) * beta
@@ -763,7 +782,7 @@ class Processor(object):
         loss_dict['total_loss'] = 0.
         for loss in loss_dict.keys():
             loss_dict['total_loss'] += loss_dict[loss]
-        return loss_dict
+        return loss_dict, [features_target, features_trimodal, features_s2eg]
 
     def per_train(self):
 
@@ -807,8 +826,8 @@ class Processor(object):
             if self.args.train_s2eg:
                 self.s2eg_generator.train()
                 self.s2eg_discriminator.train()
-                loss_dict = self.forward_pass_s2eg(extended_word_seq, audio, train_labels_oh,
-                                                   vec_seq, vid_indices, train=True)
+                loss_dict, _ = self.forward_pass_s2eg(extended_word_seq, audio, train_labels_oh,
+                                                      vec_seq, vid_indices, train=True)
                 # Compute statistics
                 batch_s2eg_loss += loss_dict['total_loss']
 
@@ -872,8 +891,8 @@ class Processor(object):
                 self.s2eg_generator.eval()
                 self.s2eg_discriminator.eval()
                 with torch.no_grad():
-                    loss_dict = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
-                                                       vec_seq, vid_indices, train=False)
+                    loss_dict, _ = self.forward_pass_s2eg(extended_word_seq, audio, eval_labels_oh,
+                                                          vec_seq, vid_indices, train=False)
                     # Compute statistics
                     batch_s2eg_loss += loss_dict['total_loss']
 
@@ -1017,11 +1036,11 @@ class Processor(object):
                 ser_loss, test_labels_pred, test_labels_oh = \
                     self.forward_pass_ser(test_data_wav,
                                           test_labels_cat if self.args.emo_as_cats else test_labels_dim)
-                loss_dict = self.forward_pass_s2eg(extended_word_seq, audio, test_labels_oh,
-                                                   vec_seq, vid_indices, train=False,
-                                                   target_seq=target_seq, words=words, aux_info=aux_info,
-                                                   save_path=self.args.video_save_path,
-                                                   make_video=True)
+                loss_dict, features = self.forward_pass_s2eg(extended_word_seq, audio, test_labels_oh,
+                                                             vec_seq, vid_indices, train=False,
+                                                             target_seq=target_seq, words=words, aux_info=aux_info,
+                                                             save_path=self.args.video_save_path,
+                                                             make_video=False, compute_features=True)
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 

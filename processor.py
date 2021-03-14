@@ -1183,8 +1183,11 @@ class Processor(object):
 
                     # prepare target seq and pre seq
                     if sub_div_idx > 0:
-                        target_seq = torch.from_numpy(
-                            target_dir_vec[n_frames * sub_div_idx:min(n_frames_total, n_frames * (sub_div_idx + 1))])\
+                        target_seq = torch.zeros_like(out_dir_vec)
+                        start_idx = n_frames * sub_div_idx
+                        end_idx = min(n_frames_total, n_frames * (sub_div_idx + 1))
+                        target_seq[0, :(end_idx - start_idx)] = torch.from_numpy(
+                            target_dir_vec[start_idx:end_idx])\
                             .unsqueeze(0).float().to(self.device)
 
                         pre_seq_trimodal[0, 0:self.config_args.n_pre_poses, :-1] =\

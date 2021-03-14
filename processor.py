@@ -783,9 +783,9 @@ class Processor(object):
         for loss in loss_dict.keys():
             loss_dict['total_loss'] += loss_dict[loss]
         return loss_dict,\
-            [convert_dir_vec_to_pose(target_seq),
-             convert_dir_vec_to_pose(out_dir_vec_trimodal),
-             convert_dir_vec_to_pose(out_dir_vec)],\
+            [convert_dir_vec_to_pose(target_seq.detach().cpu().numpy()),
+             convert_dir_vec_to_pose(out_dir_vec_trimodal.detach().cpu().numpy()),
+             convert_dir_vec_to_pose(out_dir_vec.detach().cpu().numpy())],\
             [features_target, features_trimodal, features_s2eg]
 
     def per_train(self):
@@ -1029,9 +1029,9 @@ class Processor(object):
         self.feature_extractor.eval()
         batch_size = 64
 
-        poses_target = np.zeros((samples_to_generate, self.T, self.P))
-        poses_trimodal = np.zeros((samples_to_generate, self.T, self.P))
-        poses_s2eg = np.zeros((samples_to_generate, self.T, self.P))
+        poses_target = np.zeros((samples_to_generate, self.T, self.P // self.C + 1, self.C))
+        poses_trimodal = np.zeros((samples_to_generate, self.T, self.P // self.C + 1, self.C))
+        poses_s2eg = np.zeros((samples_to_generate, self.T, self.P // self.C + 1, self.C))
 
         feature_size = self.feature_extractor.pose_encoder.out_net._modules['6'].out_features
         features_target = np.zeros((samples_to_generate, feature_size))
@@ -1057,9 +1057,9 @@ class Processor(object):
                                            make_video=False, compute_features=True)
                 end_idx = min(samples_to_generate, sample_idx + batch_size)
 
-                poses_target[sample_idx:end_idx] = poses[0].detach().cpu().numpy()
-                poses_trimodal[sample_idx:end_idx] = poses[1].detach().cpu().numpy()
-                poses_s2eg[sample_idx:end_idx] = poses[2].detach().cpu().numpy()
+                poses_target[sample_idx:end_idx] = poses[0]
+                poses_trimodal[sample_idx:end_idx] = poses[1]
+                poses_s2eg[sample_idx:end_idx] = poses[2]
 
                 features_target[sample_idx:end_idx] = features[0].detach().cpu().numpy()
                 features_trimodal[sample_idx:end_idx] = features[1].detach().cpu().numpy()
@@ -1074,6 +1074,11 @@ class Processor(object):
                             features_trimodal=features_trimodal,
                             features_s2eg=features_s2eg)
         end_time = time.time()
+        pose_diffs = np.linalg.norm(
+            np.reshape(poses_target - poses_s2eg, (samples_to_generate, -1)), axis=1) -\
+            np.linalg.norm(np.reshape(poses_target - poses_trimodal, (samples_to_generate, -1)), axis=1)
+        feature_diffs = np.linalg.norm(features_target - features_s2eg, axis=1) -\
+            np.linalg.norm(features_target - features_trimodal, axis=1)
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 
     def generate_motion_by_env_file(self, env_file, samples_to_generate=5,

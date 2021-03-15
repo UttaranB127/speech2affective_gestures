@@ -148,14 +148,14 @@ class Processor(object):
             self.dropout_prob = 0.
         else:
             self.L1 = 16
-            self.L2 = 32
-            self.L3 = 32
-            self.L4 = 32
+            self.L2 = 8
+            self.L3 = 8
+            self.L4 = 8
             self.gru_cell_units = 16
             self.attention_size = 5
             self.pool_stride_height = 2
             self.pool_stride_width = 4
-            self.F1 = 96
+            self.F1 = 32
             self.F2 = 8
             self.bidirectional = True
             self.dropout_prob = 0.

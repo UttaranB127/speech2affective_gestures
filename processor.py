@@ -19,7 +19,7 @@ from torchlight.torchlight.io import IO
 import utils.common as cmn
 
 from net.embedding_net import EmbeddingNet
-from net.ser_att_conv_rnn import AttConvRNN
+from net.ser_att_conv_rnn_v2 import AttConvRNN
 from net.multimodal_context_net import PoseGeneratorTriModal as PGT, ConvDiscriminatorTriModal as CDT
 from net.multimodal_context_net import PoseGenerator, AffDiscriminator
 from utils.data_preprocessor import DataPreprocessor
@@ -133,18 +133,32 @@ class Processor(object):
         self.T = T
         self.num_labels = self.EC if self.args.emo_as_cats else self.ED
 
-        self.L1 = 128
-        self.L2 = 256
-        self.L3 = 256
-        self.L4 = 256
-        self.gru_cell_units = 128
-        self.attention_size = 5
-        self.pool_stride_height = 2
-        self.pool_stride_width = 4
-        self.F1 = 768
-        self.F2 = 64
-        self.bidirectional = True
-        self.dropout_prob = 0.
+        if self.args.emo_as_cats:
+            self.L1 = 128
+            self.L2 = 256
+            self.L3 = 256
+            self.L4 = 256
+            self.gru_cell_units = 128
+            self.attention_size = 5
+            self.pool_stride_height = 2
+            self.pool_stride_width = 4
+            self.F1 = 768
+            self.F2 = 64
+            self.bidirectional = True
+            self.dropout_prob = 0.
+        else:
+            self.L1 = 16
+            self.L2 = 32
+            self.L3 = 32
+            self.L4 = 32
+            self.gru_cell_units = 16
+            self.attention_size = 5
+            self.pool_stride_height = 2
+            self.pool_stride_width = 4
+            self.F1 = 96
+            self.F2 = 8
+            self.bidirectional = True
+            self.dropout_prob = 0.
 
         self.pred_loss_func = nn.CrossEntropyLoss() if self.args.emo_as_cats else nn.L1Loss()
         self.best_ser_accu = 0. if self.args.emo_as_cats else -np.inf
@@ -343,14 +357,21 @@ class Processor(object):
         batch_data_s2eg = torch.zeros((self.args.batch_size, self.C, self.H, self.W)).to(self.device)
         batch_labels_cat = torch.zeros(self.args.batch_size).long().to(self.device)
         batch_labels_dim = torch.zeros((self.args.batch_size, self.ED)).float().to(self.device)
-        batch_word_seq_tensor = torch.zeros((self.args.batch_size, self.T)).long().to(self.device)
-        batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().to(self.device)
-        batch_extended_word_seq = torch.zeros((self.args.batch_size, self.T)).long().to(self.device)
-        batch_pose_seq = torch.zeros((self.args.batch_size, self.T, self.P + self.C)).float().to(self.device)
-        batch_vec_seq = torch.zeros((self.args.batch_size, self.T, self.P)).float().to(self.device)
-        batch_audio = torch.zeros((self.args.batch_size, 36267)).float().to(self.device)
-        batch_spectrogram = torch.zeros((self.args.batch_size, 128, 70)).float().to(self.device)
-        batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
+
+        if not self.args.train_ser:
+            batch_word_seq_tensor = torch.zeros((self.args.batch_size, self.T)).long().to(self.device)
+            batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().to(self.device)
+            batch_extended_word_seq = torch.zeros((self.args.batch_size, self.T)).long().to(self.device)
+            batch_pose_seq = torch.zeros((self.args.batch_size, self.T, self.P + self.C)).float().to(self.device)
+            batch_vec_seq = torch.zeros((self.args.batch_size, self.T, self.P)).float().to(self.device)
+            batch_audio = torch.zeros((self.args.batch_size, 36267)).float().to(self.device)
+            batch_spectrogram = torch.zeros((self.args.batch_size, 128, 70)).float().to(self.device)
+            batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
+        else:
+            batch_word_seq_tensor, batch_word_seq_lengths,\
+                batch_extended_word_seq, batch_pose_seq,\
+                batch_vec_seq, batch_audio,\
+                batch_spectrogram, batch_vid_indices = [None] * 8
 
         if train:
             data_ser_np = self.data_loader['train_data_ser']
@@ -412,7 +433,7 @@ class Processor(object):
                 batch_labels_cat[i] = torch.from_numpy(np.where(labels_cat_np[k])[0])
                 batch_labels_dim[i] = torch.from_numpy(labels_dim_np[k])
 
-                if self.args.train_s2eg:
+                if not self.args.train_ser:
                     with data_s2eg.lmdb_env.begin(write=False) as txn:
                         key = '{:010}'.format(k).encode('ascii')
                         sample = txn.get(key)

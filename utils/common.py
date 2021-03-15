@@ -275,10 +275,10 @@ def get_transformation(X, Y):
     sx = np.mean(np.sum(Xc * Xc, 0))
     sy = np.mean(np.sum(Yc * Yc, 0))
 
-    M = np.dot(Yc, Xc.T) / n
+    M = np.dot(Yc, Xc.time_steps) / n
 
     U, D, V = np.linalg.svd(M, full_matrices=True, compute_uv=True)
-    V = V.T.copy()
+    V = V.time_steps.copy()
     # print U,"\n\n",D,"\n\n",V
     r = np.rank(M)
     d = np.linalg.det(M)
@@ -295,7 +295,7 @@ def get_transformation(X, Y):
             t = np.zeros(2)
             return R, c, t
 
-    R = np.dot(np.dot(U, S), V.T)
+    R = np.dot(np.dot(U, S), V.time_steps)
     c = np.trace(np.dot(np.diag(D), S)) / sx
     t = my - c * np.dot(R, mx)
 

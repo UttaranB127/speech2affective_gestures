@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from net.multimodal_context_net import WavEncoder, TextEncoderTCN
+from net.multimodal_context_net_v1 import WavEncoder, TextEncoderTCN
 
 
 def re_parametrize(mu, log_var):

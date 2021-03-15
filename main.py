@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 base_path = os.path.dirname(os.path.realpath(__file__))
 data_path = j(base_path, '../../data')
 
-models_ser_path = j(base_path, 'models', 'ser')
+models_ser_path = j(base_path, 'models', 'ser_v1')
 models_s2eg_path = j(base_path, 'models', 's2eg')
 os.makedirs(models_ser_path, exist_ok=True)
 
@@ -50,9 +50,9 @@ parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
 parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
                     help='perform data augmentation by mirroring all the sequences (default: False)')
-parser.add_argument('--train-ser', type=bool, default=True, metavar='T-SER',
+parser.add_argument('--train-ser', type=bool, default=False, metavar='T-SER',
                     help='train the ser model (default: True)')
-parser.add_argument('--emo-as-cats', type=bool, default=False, metavar='EAC',
+parser.add_argument('--emo-as-cats', type=bool, default=True, metavar='EAC',
                     help='consider emotions as categories (True) or dimensions (False) (default: False)')
 parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')
@@ -72,7 +72,7 @@ parser.add_argument('--ser-num-epoch', type=int, default=5000, metavar='SER-NE',
                     help='number of epochs to train ser (default: 1000)')
 parser.add_argument('--s2eg-start-epoch', type=int, default=142, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
-parser.add_argument('--s2eg-num-epoch', type=int, default=5000, metavar='S2EG-NE',
+parser.add_argument('--s2eg-num-epoch', type=int, default=50000, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')
 # parser.add_argument('--window-length', type=int, default=1, metavar='WL',
 #                     help='max number of past time steps to take as input to transformer decoder (default: 60)')
@@ -84,7 +84,7 @@ parser.add_argument('--base-tr', type=float, default=1., metavar='TR',
                     help='base teacher rate (default: 1.0)')
 parser.add_argument('--step', type=list, default=0.05 * np.arange(20), metavar='[S]',
                     help='fraction of steps when learning rate will be decreased (default: [0.5, 0.75, 0.875])')
-parser.add_argument('--lr-ser-decay', type=float, default=0.9999, metavar='LRD-SER',
+parser.add_argument('--lr-ser-decay', type=float, default=0.999, metavar='LRD-SER',
                     help='learning rate decay for ser (default: 0.999)')
 parser.add_argument('--lr-s2eg-decay', type=float, default=0.999, metavar='LRD-S2EG',
                     help='learning rate decay for s2eg (default: 0.999)')
@@ -182,8 +182,8 @@ pr = processor.Processor(args, config_args, data_path, data_loader,
 if args.train_ser or args.train_s2eg:
     pr.train()
 
-pr.generate_motion(samples_to_generate=len(data_loader['test_data_s2eg_wav']),
-                   randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+# pr.generate_gestures(samples_to_generate=len(data_loader['test_data_s2eg_wav']),
+#                      randomized=randomized, ser_epoch='best', s2eg_epoch=142)
 
-# pr.generate_motion_by_env_file(j(data_path, 'ted_db/lmdb_test'), 5, [5, 12],
-#                                randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test_tri_cache'), [5, 12],
+                                 randomized=randomized, ser_epoch='best', s2eg_epoch=142)

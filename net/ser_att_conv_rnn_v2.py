@@ -84,25 +84,30 @@ class AttConvRNN(nn.Module):
         nn.init.constant(self.linear1.bias, init_const)
         self.batch_norm_linear1 = nn.BatchNorm1d(F1)
 
-        self.linear2 = nn.Linear(F1 * H // pool_stride_height, 1024)
-        nn.init.normal(self.linear2.weight, mean=init_mean, std=init_std)
-        self.linear2.weight.data = truncate_param(self.linear2.weight.data, init_mean + init_std * 2.)
-        nn.init.constant(self.linear2.bias, init_const)
-        self.batch_norm_linear2 = nn.BatchNorm1d(1024)
+        self.attention = Attention(F1,
+                                   attention_size=attention_size,
+                                   bidirectional=bidirectional,
+                                   init_std=init_std, init_const=init_const)
 
-        self.linear3 = nn.Linear(1024, 128)
+        # self.linear2 = nn.Linear(F1 * H // pool_stride_height, 1024)
+        # nn.init.normal(self.linear2.weight, mean=init_mean, std=init_std)
+        # self.linear2.weight.data = truncate_param(self.linear2.weight.data, init_mean + init_std * 2.)
+        # nn.init.constant(self.linear2.bias, init_const)
+        # self.batch_norm_linear2 = nn.BatchNorm1d(1024)
+
+        self.linear3 = nn.Linear(32, 16)
         nn.init.normal(self.linear3.weight, mean=init_mean, std=init_std)
         self.linear3.weight.data = truncate_param(self.linear3.weight.data, init_mean + init_std * 2.)
         nn.init.constant(self.linear3.bias, init_const)
-        self.batch_norm_linear3 = nn.BatchNorm1d(128)
+        self.batch_norm_linear3 = nn.BatchNorm1d(16)
 
-        self.linear4 = nn.Linear(128, 32)
-        nn.init.normal(self.linear4.weight, mean=init_mean, std=init_std)
-        self.linear4.weight.data = truncate_param(self.linear4.weight.data, init_mean + init_std * 2.)
-        nn.init.constant(self.linear4.bias, init_const)
-        self.batch_norm_linear4 = nn.BatchNorm1d(32)
+        # self.linear4 = nn.Linear(128, 32)
+        # nn.init.normal(self.linear4.weight, mean=init_mean, std=init_std)
+        # self.linear4.weight.data = truncate_param(self.linear4.weight.data, init_mean + init_std * 2.)
+        # nn.init.constant(self.linear4.bias, init_const)
+        # self.batch_norm_linear4 = nn.BatchNorm1d(32)
 
-        self.linear5 = nn.Linear(32, EC)
+        self.linear5 = nn.Linear(16, EC)
         nn.init.normal(self.linear5.weight, mean=init_mean, std=init_std)
         self.linear5.weight.data = truncate_param(self.linear5.weight.data, init_mean + init_std * 2.)
         nn.init.constant(self.linear5.bias, init_const)
@@ -140,10 +145,11 @@ class AttConvRNN(nn.Module):
         x_07 = self.dropout(self.activation(self.conv3(x_03))).contiguous().view(-1, self.linear1_in_size)
 
         x_08 = self.activation(self.batch_norm_linear1(self.linear1(x_07))).view(x_03.shape[0], -1)
-        x_09 = self.activation(self.batch_norm_linear2(self.linear2(x_08)))
-        x_10 = self.activation(self.batch_norm_linear3(self.linear3(x_09)))
-        x_11 = self.activation(self.batch_norm_linear4(self.linear4(x_10)))
-        x_12 = self.activation(self.linear5(x_11))
+        x_09, alphas = self.attention(x_08.view(x_03.shape[0], x_03.shape[2], -1))
+        # x_10 = self.activation(self.batch_norm_linear2(self.linear2(x_09)))
+        x_11 = self.activation(self.batch_norm_linear3(self.linear3(x_09)))
+        # x_12 = self.activation(self.batch_norm_linear4(self.linear4(x_11)))
+        x_13 = self.activation(self.linear5(x_11))
 
         # x_08 = self.activation(self.batch_norm_linear1(self.linear1(x_07))).view(x_03.shape[0], x_03.shape[2], -1)
         # x_09, _ = self.gru(x_08)
@@ -155,4 +161,4 @@ class AttConvRNN(nn.Module):
                 torch.abs(torch.std(self.conv1.weight.data)) < 1e-6) or \
                 torch.abs(torch.mean(self.conv1.weight.data)) > 1e3:
             stop = 1
-        return x_12
+        return x_13

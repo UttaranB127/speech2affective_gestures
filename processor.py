@@ -18,10 +18,11 @@ from torchlight.torchlight.io import IO
 
 import utils.common as cmn
 
-from net.embedding_net import EmbeddingNet
-from net.ser_att_conv_rnn_v2 import AttConvRNN
+from net.embedding_space_evaluator import EmbeddingSpaceEvaluator
+from net.ser_att_conv_rnn_v1 import AttConvRNN
 from net.multimodal_context_net import PoseGeneratorTriModal as PGT, ConvDiscriminatorTriModal as CDT
 from net.multimodal_context_net import PoseGenerator, AffDiscriminator
+from utils.average_meter import AverageMeter
 from utils.data_preprocessor import DataPreprocessor
 from utils.gen_utils import create_video_and_save
 from utils import losses
@@ -152,12 +153,12 @@ class Processor(object):
             self.L3 = 8
             self.L4 = 8
             self.gru_cell_units = 16
-            self.attention_size = 5
+            self.attention_size = 32
             self.pool_stride_height = 2
             self.pool_stride_width = 4
             self.F1 = 32
             self.F2 = 8
-            self.bidirectional = True
+            self.bidirectional = False
             self.dropout_prob = 0.
 
         self.pred_loss_func = nn.CrossEntropyLoss() if self.args.emo_as_cats else nn.L1Loss()
@@ -179,33 +180,30 @@ class Processor(object):
                                     F2=self.F2, bidirectional=self.bidirectional,
                                     dropout_prob=self.dropout_prob)
         if not self.args.train_ser:
-            lang_model = self.data_loader['train_data_s2eg'].lang_model
+            self.lang_model = self.data_loader['train_data_s2eg'].lang_model
             self.train_speaker_model = self.data_loader['train_data_s2eg'].speaker_model
             self.eval_speaker_model = self.data_loader['eval_data_s2eg'].speaker_model
             self.test_speaker_model = self.data_loader['test_data_s2eg'].speaker_model
             self.trimodal_generator = PGT(self.config_args,
                                           pose_dim=self.P,
-                                          n_words=lang_model.n_words,
+                                          n_words=self.lang_model.n_words,
                                           word_embed_size=self.config_args.wordembed_dim,
-                                          word_embeddings=lang_model.word_embedding_weights,
+                                          word_embeddings=self.lang_model.word_embedding_weights,
                                           z_obj=self.train_speaker_model)
             self.trimodal_discriminator = CDT(self.P)
             self.s2eg_generator = PoseGenerator(self.config_args,
-                                                n_words=lang_model.n_words,
+                                                n_words=self.lang_model.n_words,
                                                 word_embed_size=self.config_args.wordembed_dim,
-                                                word_embeddings=lang_model.word_embedding_weights,
+                                                word_embeddings=self.lang_model.word_embedding_weights,
                                                 labels_size=self.num_labels,
                                                 z_obj=self.train_speaker_model,
                                                 pose_dim=self.P)
             self.s2eg_discriminator = AffDiscriminator(self.P, self.EC if self.args.emo_as_cats else self.ED)
-            self.feature_extractor = EmbeddingNet(self.config_args, self.P, self.config_args.n_poses,
-                                                  None, None, None, mode='pose')
+            self.evaluator = EmbeddingSpaceEvaluator(self.config_args, self.P, self.lang_model, self.device)
         else:
-            lang_model, self.train_speaker_model,\
+            self.lang_model, self.train_speaker_model,\
                 self.eval_speaker_model, self.test_speaker_model,\
                 self.s2eg_generator, self.s2eg_discriminator = [None] * 6
-
-        self.lang_model = lang_model
 
         if self.args.use_multiple_gpus and torch.cuda.device_count() > 1:
             self.args.batch_size *= torch.cuda.device_count()
@@ -215,14 +213,12 @@ class Processor(object):
                 self.trimodal_discriminator = nn.DataParallel(self.trimodal_discriminator)
                 self.s2eg_generator = nn.DataParallel(self.s2eg_generator)
                 self.s2eg_discriminator = nn.DataParallel(self.s2eg_discriminator)
-                self.feature_extractor = nn.DataParallel(self.feature_extractor)
         self.ser_model.to(self.device)
         if not self.args.train_ser:
             self.trimodal_generator.to(self.device)
             self.trimodal_discriminator.to(self.device)
             self.s2eg_generator.to(self.device)
             self.s2eg_discriminator.to(self.device)
-            self.feature_extractor.to(self.device)
         self.conv2_weights = []
 
         if self.args.train_ser:
@@ -645,9 +641,46 @@ class Processor(object):
         noise = torch.randn_like(data) * 0.1
         return data + noise
 
+    def push_samples(self, target, out_dir_vec, in_text_padded, in_audio,
+                     losses_all, joint_mae, accel):
+
+        batch_size = len(target)
+
+        if self.evaluator:
+            self.evaluator.reset()
+
+        loss = F.l1_loss(out_dir_vec, target)
+
+        losses_all.update(loss.item(), batch_size)
+
+        if self.evaluator:
+            self.evaluator.push_samples(in_text_padded, in_audio, out_dir_vec, target)
+
+        # calculate MAE of joint coordinates
+        out_dir_vec_np = out_dir_vec.cpu().numpy()
+        out_dir_vec_np += np.array(self.config_args.mean_dir_vec).squeeze()
+        out_joint_poses = convert_dir_vec_to_pose(out_dir_vec_np)
+        target_vec = target.cpu().numpy()
+        target_vec += np.array(self.config_args.mean_dir_vec).squeeze()
+        target_poses = convert_dir_vec_to_pose(target_vec)
+
+        if out_joint_poses.shape[1] == self.config_args.n_poses:
+            diff = out_joint_poses[:, self.config_args.n_pre_poses:] - target_poses[:, self.config_args.n_pre_poses:]
+        else:
+            diff = out_joint_poses - target_poses[:, self.config_args.n_pre_poses:]
+        mae_val = np.mean(np.absolute(diff))
+        joint_mae.update(mae_val, batch_size)
+
+        # accel
+        target_acc = np.diff(target_poses, n=2, axis=1)
+        out_acc = np.diff(out_joint_poses, n=2, axis=1)
+        accel.update(np.mean(np.abs(target_acc - out_acc)), batch_size)
+
+        return losses_all, joint_mae, accel
+
     def forward_pass_s2eg(self, in_text, in_audio, in_emo_labels, target_poses, vid_indices, train,
                           target_seq=None, words=None, aux_info=None, save_path=None, make_video=False,
-                          compute_features=False, variational_encoding=False):
+                          calculate_metrics=False, losses_all=None, joint_mae=None, accel=None):
         warm_up_epochs = self.config_args.loss_warmup
         use_noisy_target = False
 
@@ -725,22 +758,19 @@ class Processor(object):
                       end='')
             print()
 
-        # compute diffs
-        assert not compute_features or (compute_features and target_seq is not None), \
-            'target_seq cannot be None when compute_diffs is True'
-        if compute_features:
-            _, _, _, features_target, _, _, _ = \
-                self.feature_extractor(None, None, None, target_seq, None,
-                                       variational_encoding=variational_encoding)
-            _, _, _, features_trimodal, _, _, _ = \
-                self.feature_extractor(None, None, None, out_dir_vec_trimodal, None,
-                                       variational_encoding=variational_encoding)
-            _, _, _, features_s2eg, _, _, _ = \
-                self.feature_extractor(None, None, None, out_dir_vec, None,
-                                       variational_encoding=variational_encoding)
-
-        else:
-            features_target = features_trimodal = features_s2eg = None
+        # calculate metrics
+        assert not calculate_metrics or (calculate_metrics and target_seq is not None), \
+            'target_seq cannot be None when calculate_metrics is True'
+        assert not calculate_metrics or (calculate_metrics and losses_all is not None), \
+            'losses_all cannot be None when calculate_metrics is True'
+        assert not calculate_metrics or (calculate_metrics and joint_mae is not None), \
+            'joint_mae cannot be None when calculate_metrics is True'
+        assert not calculate_metrics or (calculate_metrics and accel is not None), \
+            'accel cannot be None when calculate_metrics is True'
+        if calculate_metrics:
+            losses_all, joint_mae, accel = self.push_samples(target_seq, out_dir_vec_trimodal, in_text, in_audio,
+                                                             losses_all, joint_mae, accel)
+            # self.push_samples(target_seq, out_dir_vec, in_text, in_audio)
 
         # loss
         beta = 0.1
@@ -803,11 +833,7 @@ class Processor(object):
         loss_dict['total_loss'] = 0.
         for loss in loss_dict.keys():
             loss_dict['total_loss'] += loss_dict[loss]
-        return loss_dict,\
-            [convert_dir_vec_to_pose(target_seq.detach().cpu().numpy()),
-             convert_dir_vec_to_pose(out_dir_vec_trimodal.detach().cpu().numpy()),
-             convert_dir_vec_to_pose(out_dir_vec.detach().cpu().numpy())],\
-            [features_target, features_trimodal, features_s2eg]
+        return loss_dict, losses_all, joint_mae, accel
 
     def per_train(self):
 
@@ -1030,8 +1056,8 @@ class Processor(object):
                                jn(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
                                   format(epoch, self.epoch_info['mean_s2eg_loss'])))
 
-    def generate_motion(self, samples_to_generate=10, randomized=True,
-                        load_saved_model=True, ser_epoch='best', s2eg_epoch='best'):
+    def generate_gestures(self, samples_to_generate=10, randomized=True,
+                          load_saved_model=True, ser_epoch='best', s2eg_epoch='best'):
 
         if load_saved_model:
             ser_model_found = self.load_model_at_epoch('ser', epoch=ser_epoch)
@@ -1040,24 +1066,16 @@ class Processor(object):
             assert s2eg_model_found, print('Speech to emotive gestures model not found')
             trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
-            feature_extractor_checkpoint = torch.load('outputs/feature_extractor.pth.tar')
-            self.feature_extractor.load_state_dict(feature_extractor_checkpoint['feature_extractor_dict'])
 
         self.ser_model.eval()
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        self.feature_extractor.eval()
         batch_size = 64
 
-        poses_target = np.zeros((samples_to_generate, self.T, self.P // self.C + 1, self.C))
-        poses_trimodal = np.zeros((samples_to_generate, self.T, self.P // self.C + 1, self.C))
-        poses_s2eg = np.zeros((samples_to_generate, self.T, self.P // self.C + 1, self.C))
-
-        feature_size = self.feature_extractor.pose_encoder.out_net._modules['6'].out_features
-        features_target = np.zeros((samples_to_generate, feature_size))
-        features_trimodal = np.zeros((samples_to_generate, feature_size))
-        features_s2eg = np.zeros((samples_to_generate, feature_size))
+        losses_all = AverageMeter('loss')
+        joint_mae = AverageMeter('mae_on_joint')
+        accel = AverageMeter('accel')
 
         start_time = time.time()
         for sample_idx in np.arange(0, samples_to_generate, batch_size):
@@ -1070,44 +1088,36 @@ class Processor(object):
                 ser_loss, test_labels_pred, test_labels_oh = \
                     self.forward_pass_ser(test_data_wav,
                                           test_labels_cat if self.args.emo_as_cats else test_labels_dim)
-                loss_dict, poses, features =\
+                loss_dict, losses_all, joint_mae, accel =\
                     self.forward_pass_s2eg(extended_word_seq, audio, test_labels_oh,
                                            vec_seq, vid_indices, train=False,
                                            target_seq=target_seq, words=words, aux_info=aux_info,
                                            save_path=self.args.video_save_path,
-                                           make_video=False, compute_features=True)
+                                           make_video=False, calculate_metrics=True,
+                                           losses_all=losses_all, joint_mae=joint_mae, accel=accel)
                 end_idx = min(samples_to_generate, sample_idx + batch_size)
 
-                poses_target[sample_idx:end_idx] = poses[0]
-                poses_trimodal[sample_idx:end_idx] = poses[1]
-                poses_s2eg[sample_idx:end_idx] = poses[2]
-
-                features_target[sample_idx:end_idx] = features[0].detach().cpu().numpy()
-                features_trimodal[sample_idx:end_idx] = features[1].detach().cpu().numpy()
-                features_s2eg[sample_idx:end_idx] = features[2].detach().cpu().numpy()
-        np.savez_compressed(jn(self.args.quantitative_save_path, 'poses.npz'),
-                            poses_target=poses_target,
-                            poses_trimodal=poses_trimodal,
-                            poses_s2eg=poses_s2eg)
-
-        np.savez_compressed(jn(self.args.quantitative_save_path, 'features.npz'),
-                            features_target=features_target,
-                            features_trimodal=features_trimodal,
-                            features_s2eg=features_s2eg)
+        # print metrics
+        loss_dict = {'loss': losses_all.avg, 'joint_mae': joint_mae.avg}
+        elapsed_time = time.time() - start_time
+        if self.evaluator and self.evaluator.get_no_of_samples() > 0:
+            frechet_dist, feat_dist = self.evaluator.get_scores()
+            print('[VAL] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+                  'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg, accel.avg,
+                                                                 frechet_dist, feat_dist, elapsed_time))
+            loss_dict['frechet'] = frechet_dist
+            loss_dict['feat_dist'] = feat_dist
+        else:
+            print('[VAL] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg,
+                                                                           elapsed_time))
         end_time = time.time()
-        pose_diffs = np.linalg.norm(
-            np.reshape(poses_target - poses_s2eg, (samples_to_generate, -1)), axis=1) -\
-            np.linalg.norm(np.reshape(poses_target - poses_trimodal, (samples_to_generate, -1)), axis=1)
-        feature_diffs = np.linalg.norm(features_target - features_s2eg, axis=1) -\
-            np.linalg.norm(features_target - features_trimodal, axis=1)
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 
-    def generate_motion_by_env_file(self, env_file, samples_to_generate=5,
-                                    clip_duration_range=None, audio_fr=44100,
-                                    fft_filter_num=40, audio_block_size=300,
-                                    audio_sr=16000, randomized=True, fade_out=False,
-                                    variational_encoding=False, load_saved_model=True,
-                                    ser_epoch='best', s2eg_epoch='best'):
+    def generate_gestures_by_env_file(self, env_file, clip_duration_range=None,
+                                      audio_fr=44100, fft_filter_num=40, audio_block_size=300,
+                                      audio_sr=16000, randomized=True, fade_out=False,
+                                      load_saved_model=True, ser_epoch='best', s2eg_epoch='best',
+                                      make_video=False, save_pkl=False):
 
         if clip_duration_range is None:
             clip_duration_range = [5, 12]
@@ -1119,21 +1129,27 @@ class Processor(object):
             assert s2eg_model_found, print('Speech to emotive gestures model not found')
             trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
-            feature_extractor_checkpoint = torch.load('outputs/feature_extractor.pth.tar')
-            self.feature_extractor.load_state_dict(feature_extractor_checkpoint['feature_extractor_dict'])
 
         self.ser_model.eval()
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        self.feature_extractor.eval()
         batch_size = 64
         mean_dir_vec = np.squeeze(np.array(self.config_args.mean_dir_vec))
+
+        losses_all_trimodal = AverageMeter('loss')
+        joint_mae_trimodal = AverageMeter('mae_on_joint')
+        accel_trimodal = AverageMeter('accel')
+        losses_all = AverageMeter('loss')
+        joint_mae = AverageMeter('mae_on_joint')
+        accel = AverageMeter('accel')
 
         overall_start_time = time.time()
         lmdb_env = lmdb.open(env_file, readonly=True, lock=False)
         with lmdb_env.begin(write=False) as txn:
             keys = [key for key, _ in txn.cursor()]
+            samples_to_generate = len(keys)
+            print('Total samples to generate: {}'.format(samples_to_generate))
             for sample_idx in range(samples_to_generate):  # loop until we get the desired number of results
                 start_time = time.time()
                 # select video
@@ -1218,8 +1234,10 @@ class Processor(object):
                 else:
                     vid_idx = None
 
-                print('{}, {}, {}, {}, {}'.format(num_subdivisions, unit_time, clip_length, stride_time,
-                                                  audio_sample_length))
+                print('Subdivisions\t|\tUnit Time\t|\tClip Length\t|\tStride Time\t|\tAudio Sample Length')
+                print('{}\t\t\t\t|\t{}\t\t|\t{}\t\t\t|\t{}\t\t\t|\t{}'.format(num_subdivisions, unit_time,
+                                                                              clip_length, stride_time,
+                                                                              audio_sample_length))
 
                 out_dir_vec_trimodal = None
                 out_dir_vec = None
@@ -1331,17 +1349,11 @@ class Processor(object):
                                                                        in_text_padded, in_audio, vid_idx)
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, test_labels_oh, vid_idx)
 
-                    _, _, _, feature_target, _, _, _ =\
-                        self.feature_extractor(None, None, None, target_seq, None,
-                                               variational_encoding=variational_encoding)
-                    _, _, _, feature_trimodal, _, _, _ =\
-                        self.feature_extractor(None, None, None, out_dir_vec_trimodal, None,
-                                               variational_encoding=variational_encoding)
-                    _, _, _, feature_s2eg, _, _, _ =\
-                        self.feature_extractor(None, None, None, out_dir_vec, None,
-                                               variational_encoding=variational_encoding)
-                    diff = torch.norm(feature_target - feature_s2eg) - torch.norm(feature_target - feature_trimodal)
-                    print(' Feature diff: {:.4f}'.format(diff.item()))
+                    losses_all_trimodal, joint_mae_trimodal, accel_trimodal =\
+                        self.push_samples(target_seq, out_dir_vec_trimodal, in_text_padded, in_audio,
+                                          losses_all_trimodal, joint_mae_trimodal, accel_trimodal)
+                    losses_all, joint_mae, accel = self.push_samples(target_seq, out_dir_vec, in_text_padded, in_audio,
+                                                                     losses_all, joint_mae, accel)
 
                     out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
@@ -1420,49 +1432,63 @@ class Processor(object):
                     out_dir_vec[start_frame:end_frame] = interpolated_y
 
                 # make a video
-                sentence_words = []
-                for word, _, _ in clip_words:
-                    sentence_words.append(word)
-                sentence = ' '.join(sentence_words)
+                if make_video:
+                    sentence_words = []
+                    for word, _, _ in clip_words:
+                        sentence_words.append(word)
+                    sentence = ' '.join(sentence_words)
 
-                filename_prefix = '{}_{}_{}'.format(vid_name, vid_idx, clip_idx)
-                filename_prefix_for_video = filename_prefix
-                aux_str = '({}, time: {}-{})'.format(vid_name, str(datetime.timedelta(seconds=clip_time[0])),
-                                                     str(datetime.timedelta(seconds=clip_time[1])))
-                create_video_and_save(
-                    self.args.video_save_path, 0, filename_prefix_for_video, 0, target_dir_vec,
-                    out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
-                    audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
-                    delete_audio_file=False)
-
-                # save pkl
-                out_dir_vec_trimodal = out_dir_vec_trimodal + mean_dir_vec
-                out_poses_trimodal = convert_dir_vec_to_pose(out_dir_vec_trimodal)
-
-                save_dict = {
-                    'sentence': sentence, 'audio': clip_audio.astype(np.float32),
-                    'out_dir_vec': out_dir_vec_trimodal, 'out_poses': out_poses_trimodal,
-                    'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
-                    'human_dir_vec': target_dir_vec + mean_dir_vec,
-                }
-                with open(jn(self.args.video_save_path, '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
-                    pickle.dump(save_dict, f)
+                    filename_prefix = '{}_{}_{}'.format(vid_name, vid_idx, clip_idx)
+                    filename_prefix_for_video = filename_prefix
+                    aux_str = '({}, time: {}-{})'.format(vid_name, str(datetime.timedelta(seconds=clip_time[0])),
+                                                         str(datetime.timedelta(seconds=clip_time[1])))
+                    create_video_and_save(
+                        self.args.video_save_path, 0, filename_prefix_for_video, 0, target_dir_vec,
+                        out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
+                        audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
+                        delete_audio_file=False)
+                    print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
+                                                                                           samples_to_generate,
+                                                                                           time.time() - start_time))
 
                 # save pkl
-                out_dir_vec = out_dir_vec + mean_dir_vec
-                out_poses = convert_dir_vec_to_pose(out_dir_vec)
+                if save_pkl:
+                    out_dir_vec_trimodal = out_dir_vec_trimodal + mean_dir_vec
+                    out_poses_trimodal = convert_dir_vec_to_pose(out_dir_vec_trimodal)
 
-                save_dict = {
-                    'sentence': sentence, 'audio': clip_audio.astype(np.float32),
-                    'out_dir_vec': out_dir_vec, 'out_poses': out_poses,
-                    'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
-                    'human_dir_vec': target_dir_vec + mean_dir_vec,
-                }
-                with open(jn(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
-                    pickle.dump(save_dict, f)
-                print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
-                                                                                       samples_to_generate,
-                                                                                       time.time() - start_time))
+                    save_dict = {
+                        'sentence': sentence, 'audio': clip_audio.astype(np.float32),
+                        'out_dir_vec': out_dir_vec_trimodal, 'out_poses': out_poses_trimodal,
+                        'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
+                        'human_dir_vec': target_dir_vec + mean_dir_vec,
+                    }
+                    with open(jn(self.args.video_save_path, '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
+                        pickle.dump(save_dict, f)
 
+                    out_dir_vec = out_dir_vec + mean_dir_vec
+                    out_poses = convert_dir_vec_to_pose(out_dir_vec)
+
+                    save_dict = {
+                        'sentence': sentence, 'audio': clip_audio.astype(np.float32),
+                        'out_dir_vec': out_dir_vec, 'out_poses': out_poses,
+                        'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
+                        'human_dir_vec': target_dir_vec + mean_dir_vec,
+                    }
+                    with open(jn(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
+                        pickle.dump(save_dict, f)
+
+        # print metrics
+        loss_dict = {'loss': losses_all.avg, 'joint_mae': joint_mae.avg}
+        elapsed_time = time.time() - start_time
+        if self.evaluator and self.evaluator.get_no_of_samples() > 0:
+            frechet_dist, feat_dist = self.evaluator.get_scores()
+            print('[VAL] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+                  'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg, accel.avg,
+                                                                 frechet_dist, feat_dist, elapsed_time))
+            loss_dict['frechet'] = frechet_dist
+            loss_dict['feat_dist'] = feat_dist
+        else:
+            print('[VAL] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg,
+                                                                           elapsed_time))
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - overall_start_time))

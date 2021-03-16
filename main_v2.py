@@ -58,7 +58,7 @@ parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
 parser.add_argument('--s2eg-start-epoch', type=int, default=142, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
-parser.add_argument('--s2eg-num-epoch', type=int, default=50000, metavar='S2EG-NE',
+parser.add_argument('--s2eg-num-epoch', type=int, default=500, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')
 # parser.add_argument('--window-length', type=int, default=1, metavar='WL',
 #                     help='max number of past time steps to take as input to transformer decoder (default: 60)')
@@ -88,7 +88,7 @@ parser.add_argument('--recons-reg', type=float, default=1.2, metavar='RCR',
                     help='regularization for reconstruction loss (default: 1.2)')
 parser.add_argument('--eval-interval', type=int, default=1, metavar='EI',
                     help='interval after which model is evaluated (default: 1)')
-parser.add_argument('--log-interval', type=int, default=100, metavar='LI',
+parser.add_argument('--log-interval', type=int, default=1, metavar='LI',
                     help='interval after which log is printed (default: 100)')
 parser.add_argument('--save-interval', type=int, default=10, metavar='SI',
                     help='interval after which model is saved (default: 10)')
@@ -121,9 +121,8 @@ data_loader = dict(train_data_s2eg=train_data_ted, eval_data_s2eg=eval_data_ted,
 pose_dim = 27
 coords = 3
 audio_sr = 16000
-num_mfcc = 13
 
-pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, audio_sr, num_mfcc)
+pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, audio_sr)
 
 if args.train_s2eg:
     pr.train()
@@ -131,5 +130,5 @@ if args.train_s2eg:
 # pr.generate_gestures(samples_to_generate=len(data_loader['test_data_s2eg_wav']),
 #                      randomized=randomized, ser_epoch='best', s2eg_epoch=142)
 
-pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
-                                 randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+# pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
+#                                  randomized=randomized, ser_epoch='best', s2eg_epoch=142)

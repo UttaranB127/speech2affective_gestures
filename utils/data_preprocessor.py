@@ -7,6 +7,8 @@ import math
 import numpy as np
 import pyarrow
 import tqdm
+
+from librosa.feature import mfcc
 from sklearn.preprocessing import normalize
 
 import utils.ted_db_utils as data_utils
@@ -15,13 +17,14 @@ from utils.motion_preprocessor import MotionPreprocessor
 
 
 class DataPreprocessor:
-    def __init__(self, clip_lmdb_dir, out_lmdb_dir, n_poses, subdivision_stride,
-                 pose_resampling_fps, mean_pose, mean_dir_vec, disable_filtering=False):
+    def __init__(self, clip_lmdb_dir, out_lmdb_dir, n_poses, subdivision_stride, pose_resampling_fps,
+                 mean_pose, mean_dir_vec, num_mfcc, disable_filtering=False):
         self.n_poses = n_poses
         self.subdivision_stride = subdivision_stride
         self.skeleton_resampling_fps = pose_resampling_fps
         self.mean_pose = mean_pose
         self.mean_dir_vec = mean_dir_vec
+        self.num_mfcc = num_mfcc
         self.disable_filtering = disable_filtering
 
         self.src_lmdb_env = lmdb.open(clip_lmdb_dir, readonly=True, lock=False)
@@ -88,6 +91,7 @@ class DataPreprocessor:
         sample_words_list = []
         sample_audio_list = []
         sample_spectrogram_list = []
+        sample_mfcc_list = []
 
         num_subdivision = math.floor(
             (len(clip_skeleton) - self.n_poses)
@@ -131,6 +135,9 @@ class DataPreprocessor:
             else:
                 sample_audio = clip_audio_raw[audio_start:audio_end]
 
+            # mfcc features
+            sample_mfcc = mfcc(sample_audio, sr=16000, n_mfcc=self.num_mfcc) / 1000.
+
             if len(sample_words) >= 2:
                 # filtering motion skeleton data
                 sample_skeletons, filtering_message = MotionPreprocessor(sample_skeletons, self.mean_pose).get()
@@ -147,15 +154,17 @@ class DataPreprocessor:
                     sample_words_list.append(sample_words)
                     sample_audio_list.append(sample_audio)
                     sample_spectrogram_list.append(sample_spectrogram)
+                    sample_mfcc_list.append(sample_mfcc)
                     aux_info.append(motion_info)
                 else:
                     n_filtered_out[filtering_message] += 1
 
         if len(sample_skeletons_list) > 0:
             with self.dst_lmdb_env.begin(write=True) as txn:
-                for words, poses, audio, spectrogram, aux in zip(sample_words_list, sample_skeletons_list,
-                                                                 sample_audio_list, sample_spectrogram_list,
-                                                                 aux_info):
+                for words, poses, audio, spectrogram,\
+                        mfcc_features, aux in zip(sample_words_list, sample_skeletons_list,
+                                                  sample_audio_list, sample_spectrogram_list,
+                                                  sample_mfcc_list, aux_info):
                     # preprocessing for poses
                     poses = np.asarray(poses)
                     dir_vec = data_utils.convert_pose_seq_to_dir_vec(poses)
@@ -163,7 +172,7 @@ class DataPreprocessor:
 
                     # save
                     k = '{:010}'.format(self.n_out_samples).encode('ascii')
-                    v = [words, poses, normalized_dir_vec, audio, spectrogram, aux]
+                    v = [words, poses, normalized_dir_vec, audio, spectrogram, mfcc_features, aux]
                     v = pyarrow.serialize(v).to_buffer()
                     txn.put(k, v)
                     self.n_out_samples += 1

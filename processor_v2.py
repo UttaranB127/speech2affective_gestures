@@ -13,7 +13,6 @@ import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 
-from librosa.feature import mfcc
 from os.path import join as jn
 from torchlight.torchlight.io import IO
 
@@ -84,7 +83,7 @@ class Processor(object):
     """
 
     def __init__(self, args, s2eg_config_args, data_loader, pose_dim, coords,
-                 audio_sr, num_mfcc, min_train_epochs=20, zfill=6):
+                 audio_sr, min_train_epochs=20, zfill=6):
         self.device = torch.device('cuda:{}'.format(torch.cuda.current_device())
                                    if torch.cuda.is_available() else 'cpu')
 
@@ -104,15 +103,11 @@ class Processor(object):
         self.pose_dim = pose_dim
         self.coords = coords
         self.audio_sr = audio_sr
-        self.num_mfcc = num_mfcc
 
         self.time_steps = self.data_loader['train_data_s2eg'].n_poses
         self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
         self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
-
-        self.mfcc_scale = 1000.
-        self.mfcc_ws = 512
-        self.mfcc_length = int(np.ceil(self.audio_length / self.mfcc_ws))
+        self.mfcc_length = int(np.ceil(self.audio_length / self.s2eg_config_args.num_mfcc))
 
         self.best_s2eg_loss = np.inf
         self.best_s2eg_loss_epoch = None
@@ -135,7 +130,7 @@ class Processor(object):
                                             n_words=self.lang_model.n_words,
                                             word_embed_size=self.s2eg_config_args.wordembed_dim,
                                             word_embeddings=self.lang_model.word_embedding_weights,
-                                            num_mfcc=self.num_mfcc,
+                                            num_mfcc=self.s2eg_config_args.num_mfcc,
                                             mfcc_length=self.mfcc_length,
                                             time_steps=self.time_steps,
                                             z_obj=self.train_speaker_model)
@@ -252,7 +247,8 @@ class Processor(object):
         batch_audio = torch.zeros((self.args.batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((self.args.batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
-        batch_mfcc = torch.zeros((self.args.batch_size, self.num_mfcc, self.mfcc_length)).float().to(self.device)
+        batch_mfcc = torch.zeros((self.args.batch_size, self.s2eg_config_args.num_mfcc,
+                                  self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
 
         if train:
@@ -309,7 +305,7 @@ class Processor(object):
                     key = '{:010}'.format(k).encode('ascii')
                     sample = txn.get(key)
                     sample = pyarrow.deserialize(sample)
-                    word_seq, pose_seq, vec_seq, audio, spectrogram, aux_info = sample
+                    word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
 
                     # vid_name = sample[-1]['vid']
                     # clip_start = str(sample[-1]['start_time'])
@@ -322,6 +318,7 @@ class Processor(object):
                     sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
                     audio = make_audio_fixed_length(audio, self.audio_length)
                     spectrogram = spectrogram[:, 0:self.spectrogram_length]
+                    mfcc_features = mfcc_features[:, 0:self.mfcc_length]
                     vec_seq = vec_seq[0:data_s2eg.n_poses]
                     pose_seq = pose_seq[0:data_s2eg.n_poses]
                 else:
@@ -333,7 +330,7 @@ class Processor(object):
                 vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
                 pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
                 # scaled_audio = np.int16(audio / np.max(np.abs(audio)) * self.audio_length)
-                mfcc_features = torch.from_numpy(mfcc(audio, sr=self.audio_sr, n_mfcc=self.num_mfcc)).float()
+                mfcc_features = torch.from_numpy(mfcc_features).float()
                 audio = torch.from_numpy(audio).float()
                 spectrogram = torch.from_numpy(spectrogram)
 
@@ -344,7 +341,7 @@ class Processor(object):
                 batch_vec_seq[i] = vec_seq
                 batch_audio[i] = audio
                 batch_spectrogram[i] = spectrogram
-                batch_mfcc[i] = mfcc_features / self.mfcc_scale
+                batch_mfcc[i] = mfcc_features
                 # speaker input
                 if train:
                     if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
@@ -385,7 +382,8 @@ class Processor(object):
         batch_audio = torch.zeros((batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
-        batch_mfcc = torch.zeros((batch_size, self.num_mfcc, self.mfcc_length)).float().to(self.device)
+        batch_mfcc = torch.zeros((batch_size, self.s2eg_config_args.num_mfcc,
+                                  self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 
         def extend_word_seq(lang, words, end_time=None):
@@ -431,7 +429,7 @@ class Processor(object):
                     key = '{:010}'.format(k).encode('ascii')
                     sample = txn.get(key)
                     sample = pyarrow.deserialize(sample)
-                    word_seq, pose_seq, vec_seq, audio, spectrogram, aux_info = sample
+                    word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
 
                     # for selected_vi in range(len(word_seq)):  # make start time of input text zero
                     #     word_seq[selected_vi][1] -= aux_info['start_time']  # start time
@@ -446,6 +444,7 @@ class Processor(object):
                     sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
                     audio = make_audio_fixed_length(audio, self.audio_length)
                     spectrogram = spectrogram[:, 0:self.spectrogram_length]
+                    mfcc_features = mfcc_features[:, 0:self.mfcc_length]
                     vec_seq = vec_seq[0:data_s2eg.n_poses]
                     pose_seq = pose_seq[0:data_s2eg.n_poses]
                 else:
@@ -459,7 +458,7 @@ class Processor(object):
                 target_seq = convert_pose_seq_to_dir_vec(pose_seq)
                 target_seq = target_seq.reshape(target_seq.shape[0], -1)
                 target_seq -= np.reshape(self.s2eg_config_args.mean_dir_vec, -1)
-                mfcc_features = torch.from_numpy(mfcc(audio, sr=self.audio_sr, n_mfcc=self.num_mfcc)).float()
+                mfcc_features = torch.from_numpy(mfcc_features)
                 audio = torch.from_numpy(audio).float()
                 spectrogram = torch.from_numpy(spectrogram)
 
@@ -471,7 +470,7 @@ class Processor(object):
                 batch_target_seq[i] = torch.from_numpy(target_seq).float()
                 batch_audio[i] = audio
                 batch_spectrogram[i] = spectrogram
-                batch_mfcc[i] = mfcc_features / self.mfcc_scale
+                batch_mfcc[i] = mfcc_features
                 # speaker input
                 if self.test_speaker_model and self.test_speaker_model.__class__.__name__ == 'Vocab':
                     batch_vid_indices[i] =\
@@ -682,13 +681,13 @@ class Processor(object):
 
     def per_train(self):
 
+        self.s2eg_generator.train()
+        self.s2eg_discriminator.train()
         batch_s2eg_loss = 0.
         num_batches = 0.
 
         for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq,\
                 vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=True):
-            self.s2eg_generator.train()
-            self.s2eg_discriminator.train()
             loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                                    vec_seq, vid_indices, train=True)
             # Compute statistics
@@ -712,13 +711,13 @@ class Processor(object):
 
     def per_eval(self):
 
+        self.s2eg_generator.eval()
+        self.s2eg_discriminator.eval()
         batch_s2eg_loss = 0.
         num_batches = 0.
 
         for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq,\
                 vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=False):
-            self.s2eg_generator.eval()
-            self.s2eg_discriminator.eval()
 
             with torch.no_grad():
                 loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
@@ -933,8 +932,8 @@ class Processor(object):
 
                 # divide into synthesize units and do synthesize
                 unit_time = self.s2eg_config_args.n_poses / self.s2eg_config_args.motion_resampling_framerate
-                stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) / \
-                              self.s2eg_config_args.motion_resampling_framerate
+                stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) /\
+                    self.s2eg_config_args.motion_resampling_framerate
                 if clip_length < unit_time:
                     num_subdivisions = 1
                 else:
@@ -975,9 +974,7 @@ class Processor(object):
                         if sub_div_idx == num_subdivisions - 1:
                             end_padding_duration = audio_sample_length - len(in_audio_np)
                         in_audio_np = np.pad(in_audio_np, (0, audio_sample_length - len(in_audio_np)), 'constant')
-                    in_mfcc = torch.from_numpy(mfcc(in_audio_np,
-                                                    sr=self.audio_sr,
-                                                    n_mfcc=self.num_mfcc)).to(self.device).float() / self.mfcc_scale
+                    in_mfcc = xxx
                     in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
 
                     # prepare text input

@@ -21,6 +21,7 @@ def parse_args():
     parser.add("--val_data_path", action="append")
     parser.add("--test_data_path", action="append")
     parser.add("--model_save_path", required=True)
+    parser.add("--num_mfcc", type=int, default=13)
     parser.add("--pose_representation", type=str, default='3d_vec')
     parser.add("--mean_dir_vec", action="append", type=float, nargs='*')
     parser.add("--mean_pose", action="append", type=float, nargs='*')

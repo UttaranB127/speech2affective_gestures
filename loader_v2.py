@@ -434,8 +434,8 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
 
 
 class TedDBParams:
-    def __init__(self, lmdb_dir, n_poses, subdivision_stride, pose_resampling_fps, mean_pose, mean_dir_vec,
-                 speaker_model=None, remove_word_timing=False):
+    def __init__(self, lmdb_dir, n_poses, subdivision_stride, pose_resampling_fps,
+                 mean_pose, mean_dir_vec, num_mfcc, speaker_model=None, remove_word_timing=False):
         self.lmdb_dir = lmdb_dir
         self.n_poses = n_poses
         self.subdivision_stride = subdivision_stride
@@ -445,19 +445,21 @@ class TedDBParams:
 
         self.expected_audio_length = int(round(n_poses / pose_resampling_fps * 16000))
         self.expected_spectrogram_length = calc_spectrogram_length_from_motion_length(n_poses, pose_resampling_fps)
+        self.num_mfcc = num_mfcc
+        self.mfcc_length = int(np.ceil(self.expected_audio_length) / 512)
 
         self.lang_model = None
 
         print('Reading data \'{}\'...'.format(lmdb_dir))
-        preloaded_dir = lmdb_dir + '_cache'
+        preloaded_dir = lmdb_dir + '_s2eg_v2_cache_mfcc_{}'.format(self.num_mfcc)
         if not os.path.exists(preloaded_dir):
             print('Creating the dataset cache...')
             assert mean_dir_vec is not None
             if mean_dir_vec.shape[-1] != 3:
                 mean_dir_vec = mean_dir_vec.reshape(mean_dir_vec.shape[:-1] + (-1, 3))
             n_poses_extended = int(round(n_poses * 1.25))  # some margin
-            data_sampler = DataPreprocessor(lmdb_dir, preloaded_dir, n_poses_extended,
-                                            subdivision_stride, pose_resampling_fps, mean_pose, mean_dir_vec)
+            data_sampler = DataPreprocessor(lmdb_dir, preloaded_dir, n_poses_extended, subdivision_stride,
+                                            pose_resampling_fps, mean_pose, mean_dir_vec, self.num_mfcc)
             data_sampler.run()
         else:
             print('Found the cache {}'.format(preloaded_dir))
@@ -540,6 +542,7 @@ def load_ted_db_data(_path, config_args):
                                 pose_resampling_fps=config_args.motion_resampling_framerate,
                                 mean_dir_vec=mean_dir_vec,
                                 mean_pose=config_args.mean_pose,
+                                num_mfcc=config_args.num_mfcc,
                                 remove_word_timing=(config_args.input_context == 'text')
                                 )
 
@@ -549,6 +552,7 @@ def load_ted_db_data(_path, config_args):
                                pose_resampling_fps=config_args.motion_resampling_framerate,
                                mean_dir_vec=mean_dir_vec,
                                mean_pose=config_args.mean_pose,
+                               num_mfcc=config_args.num_mfcc,
                                remove_word_timing=(config_args.input_context == 'text')
                                )
 
@@ -557,6 +561,7 @@ def load_ted_db_data(_path, config_args):
                                subdivision_stride=config_args.subdivision_stride,
                                pose_resampling_fps=config_args.motion_resampling_framerate,
                                mean_dir_vec=mean_dir_vec,
+                               num_mfcc=config_args.num_mfcc,
                                mean_pose=config_args.mean_pose)
 
     # build vocab

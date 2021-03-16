@@ -11,6 +11,9 @@ wordembed_path: ../../data/fasttext/crawl-300d-2M-subword.bin
 model_save_path: ../output/train_multimodal_context
 random_seed: -1
 
+# data params
+num_mfcc: 13
+
 # model params
 model: multimodal_context
 mean_dir_vec: [ 0.0154009, -0.9690125, -0.0884354, -0.0022264, -0.8655276, 0.4342174, -0.0035145, -0.8755367, -0.4121039, -0.9236511, 0.3061306, -0.0012415, -0.5155854,  0.8129665,  0.0871897, 0.2348464,  0.1846561,  0.8091402,  0.9271948,  0.2960011, -0.013189 ,  0.5233978,  0.8092403,  0.0725451, -0.2037076, 0.1924306,  0.8196916]

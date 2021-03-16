@@ -44,7 +44,7 @@ def find_all_substr(a_str, sub):
         start += len(sub)  # use start += 1 to find overlapping matches
 
 
-def get_epoch_and_loss(path_to_model_files, emo_as_cats, epoch='best'):
+def get_epoch_and_loss(path_to_model_files, epoch='best'):
     all_models = os.listdir(path_to_model_files)
     if len(all_models) < 2:
         return '', None, np.inf
@@ -82,7 +82,7 @@ class Processor(object):
         Processor for emotive gesture generation
     """
 
-    def __init__(self, args, s2eg_config_args, data_loader, pose_dim, time_steps,
+    def __init__(self, args, s2eg_config_args, data_loader, pose_dim, coords,
                  min_train_epochs=20,
                  zfill=6,
                  save_path=None):
@@ -103,7 +103,10 @@ class Processor(object):
 
         # model
         self.pose_dim = pose_dim
-        self.time_steps = time_steps
+        self.coords = coords
+        self.time_steps = self.data_loader['train_data_s2eg'].n_poses
+        self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
+        self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
         self.best_s2eg_loss = np.inf
         self.best_s2eg_loss_epoch = None
         self.s2eg_loss_updated = False
@@ -174,12 +177,11 @@ class Processor(object):
         return data, poses, quat, trans, affs
 
     def load_model_at_epoch(self, epoch='best'):
-        model_name = None
         model_name, self.best_s2eg_loss_epoch, self.best_s2eg_loss =\
-            get_epoch_and_loss(self.args.work_dir, emo_as_cats=self.args.emo_as_cats, epoch=epoch)
+            get_epoch_and_loss(self.args.work_dir_s2eg, epoch=epoch)
         model_found = False
         try:
-            loaded_vars = torch.load(jn(self.args.work_dir, model_name))
+            loaded_vars = torch.load(jn(self.args.work_dir_s2eg, model_name))
             self.s2eg_generator.load_state_dict(loaded_vars['gen_model_dict'])
             self.s2eg_discriminator.load_state_dict(loaded_vars['dis_model_dict'])
             model_found = True
@@ -201,16 +203,9 @@ class Processor(object):
 
     def show_epoch_info(self):
 
-        best_metrics = []
-        print_epochs = []
-        if self.args.train_ser:
-            best_metrics = [self.best_ser_accu, self.best_ser_accu_loss]
-            print_epochs = [self.best_ser_accu_epoch
-                            if self.best_ser_accu_epoch is not None else 0] * len(best_metrics)
-        if self.args.train_s2eg:
-            best_metrics = [self.best_s2eg_loss]
-            print_epochs = [self.best_s2eg_loss_epoch
-                            if self.best_s2eg_loss_epoch is not None else 0] * len(best_metrics)
+        best_metrics = [self.best_s2eg_loss]
+        print_epochs = [self.best_s2eg_loss_epoch
+                        if self.best_s2eg_loss_epoch is not None else 0] * len(best_metrics)
         i = 0
         for k, v in self.epoch_info.items():
             self.io.print_log('\t{}: {}. Best so far: {:.4f} (epoch: {:d}).'.
@@ -241,10 +236,12 @@ class Processor(object):
         batch_word_seq_tensor = torch.zeros((self.args.batch_size, self.time_steps)).long().to(self.device)
         batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().to(self.device)
         batch_extended_word_seq = torch.zeros((self.args.batch_size, self.time_steps)).long().to(self.device)
-        batch_pose_seq = torch.zeros((self.args.batch_size, self.time_steps, self.pose_dim)).float().to(self.device)
+        batch_pose_seq = torch.zeros((self.args.batch_size, self.time_steps,
+                                      self.pose_dim + self.coords)).float().to(self.device)
         batch_vec_seq = torch.zeros((self.args.batch_size, self.time_steps, self.pose_dim)).float().to(self.device)
-        batch_audio = torch.zeros((self.args.batch_size, 36267)).float().to(self.device)
-        batch_spectrogram = torch.zeros((self.args.batch_size, 128, 70)).float().to(self.device)
+        batch_audio = torch.zeros((self.args.batch_size, self.audio_length)).float().to(self.device)
+        batch_spectrogram = torch.zeros((self.args.batch_size, 128,
+                                         self.spectrogram_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
 
         if train:
@@ -312,8 +309,8 @@ class Processor(object):
 
                 if do_clipping:
                     sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
-                    audio = make_audio_fixed_length(audio, data_s2eg.expected_audio_length)
-                    spectrogram = spectrogram[:, 0:data_s2eg.expected_spectrogram_length]
+                    audio = make_audio_fixed_length(audio, self.audio_length)
+                    spectrogram = spectrogram[:, 0:self.spectrogram_length]
                     vec_seq = vec_seq[0:data_s2eg.n_poses]
                     pose_seq = pose_seq[0:data_s2eg.n_poses]
                 else:
@@ -367,11 +364,13 @@ class Processor(object):
         batch_word_seq_tensor = torch.zeros((batch_size, self.time_steps)).long().to(self.device)
         batch_word_seq_lengths = torch.zeros(batch_size).long().to(self.device)
         batch_extended_word_seq = torch.zeros((batch_size, self.time_steps)).long().to(self.device)
-        batch_pose_seq = torch.zeros((batch_size, self.time_steps, self.pose_dim + self.C)).float().to(self.device)
+        batch_pose_seq = torch.zeros((batch_size, self.time_steps,
+                                      self.pose_dim + self.coords)).float().to(self.device)
         batch_vec_seq = torch.zeros((batch_size, self.time_steps, self.pose_dim)).float().to(self.device)
         batch_target_seq = torch.zeros((batch_size, self.time_steps, self.pose_dim)).float().to(self.device)
-        batch_audio = torch.zeros((batch_size, 36267)).float().to(self.device)
-        batch_spectrogram = torch.zeros((batch_size, 128, 70)).float().to(self.device)
+        batch_audio = torch.zeros((batch_size, self.audio_length)).float().to(self.device)
+        batch_spectrogram = torch.zeros((batch_size, 128,
+                                         self.spectrogram_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 
         def extend_word_seq(lang, words, end_time=None):
@@ -430,8 +429,8 @@ class Processor(object):
 
                 if do_clipping:
                     sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
-                    audio = make_audio_fixed_length(audio, data_s2eg.expected_audio_length)
-                    spectrogram = spectrogram[:, 0:data_s2eg.expected_spectrogram_length]
+                    audio = make_audio_fixed_length(audio, self.audio_length)
+                    spectrogram = spectrogram[:, 0:self.spectrogram_length]
                     vec_seq = vec_seq[0:data_s2eg.n_poses]
                     pose_seq = pose_seq[0:data_s2eg.n_poses]
                 else:

@@ -119,11 +119,11 @@ train_data_ted, eval_data_ted, test_data_ted = loader.load_ted_db_data(data_path
 
 data_loader = dict(train_data_s2eg=train_data_ted, eval_data_s2eg=eval_data_ted, test_data_s2eg=test_data_ted)
 pose_dim = 27
-time_steps = 34
+coords = 3
 
-pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, time_steps, save_path=base_path)
+pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, save_path=base_path)
 
-if args.train_ser or args.train_s2eg:
+if args.train_s2eg:
     pr.train()
 
 # pr.generate_gestures(samples_to_generate=len(data_loader['test_data_s2eg_wav']),

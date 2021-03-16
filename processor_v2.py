@@ -107,7 +107,7 @@ class Processor(object):
         self.time_steps = self.data_loader['train_data_s2eg'].n_poses
         self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
         self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
-        self.mfcc_length = int(np.ceil(self.audio_length / self.s2eg_config_args.num_mfcc))
+        self.mfcc_length = int(np.ceil(self.audio_length / 512))
 
         self.best_s2eg_loss = np.inf
         self.best_s2eg_loss_epoch = None

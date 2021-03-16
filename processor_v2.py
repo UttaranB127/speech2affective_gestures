@@ -13,6 +13,7 @@ import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 
+from librosa.feature import mfcc
 from os.path import join as jn
 from torchlight.torchlight.io import IO
 
@@ -83,9 +84,7 @@ class Processor(object):
     """
 
     def __init__(self, args, s2eg_config_args, data_loader, pose_dim, coords,
-                 min_train_epochs=20,
-                 zfill=6,
-                 save_path=None):
+                 audio_sr, num_mfcc, min_train_epochs=20, zfill=6):
         self.device = torch.device('cuda:{}'.format(torch.cuda.current_device())
                                    if torch.cuda.is_available() else 'cpu')
 
@@ -104,9 +103,17 @@ class Processor(object):
         # model
         self.pose_dim = pose_dim
         self.coords = coords
+        self.audio_sr = audio_sr
+        self.num_mfcc = num_mfcc
+
         self.time_steps = self.data_loader['train_data_s2eg'].n_poses
         self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
         self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
+
+        self.mfcc_scale = 1000.
+        self.mfcc_ws = 512
+        self.mfcc_length = int(np.ceil(self.audio_length / self.mfcc_ws))
+
         self.best_s2eg_loss = np.inf
         self.best_s2eg_loss_epoch = None
         self.s2eg_loss_updated = False
@@ -124,11 +131,12 @@ class Processor(object):
                                       z_obj=self.train_speaker_model)
         self.trimodal_discriminator = CDT(self.pose_dim)
         self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
+                                            pose_dim=self.pose_dim,
                                             n_words=self.lang_model.n_words,
                                             word_embed_size=self.s2eg_config_args.wordembed_dim,
                                             word_embeddings=self.lang_model.word_embedding_weights,
-                                            z_obj=self.train_speaker_model,
-                                            pose_dim=self.pose_dim)
+                                            mfcc_length=self.mfcc_length,
+                                            z_obj=self.train_speaker_model)
         self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
         self.evaluator = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim, self.lang_model, self.device)
 
@@ -242,6 +250,7 @@ class Processor(object):
         batch_audio = torch.zeros((self.args.batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((self.args.batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
+        batch_mfcc = torch.zeros((self.args.batch_size, self.num_mfcc, self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
 
         if train:
@@ -321,6 +330,8 @@ class Processor(object):
                 extended_word_seq = extend_word_seq(data_s2eg.lang_model, word_seq, sample_end_time)
                 vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
                 pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
+                # scaled_audio = np.int16(audio / np.max(np.abs(audio)) * self.audio_length)
+                mfcc_features = torch.from_numpy(mfcc(audio, sr=self.audio_sr, n_mfcc=self.num_mfcc)).float()
                 audio = torch.from_numpy(audio).float()
                 spectrogram = torch.from_numpy(spectrogram)
 
@@ -331,6 +342,7 @@ class Processor(object):
                 batch_vec_seq[i] = vec_seq
                 batch_audio[i] = audio
                 batch_spectrogram[i] = spectrogram
+                batch_mfcc[i] = mfcc_features / self.mfcc_scale
                 # speaker input
                 if train:
                     if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
@@ -341,8 +353,8 @@ class Processor(object):
                         batch_vid_indices[i] =\
                             torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
 
-            yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq,\
-                batch_pose_seq, batch_vec_seq, batch_audio, batch_spectrogram, batch_vid_indices
+            yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq, batch_pose_seq,\
+                batch_vec_seq, batch_audio, batch_spectrogram, batch_mfcc, batch_vid_indices
 
     def return_batch(self, batch_size, randomized=True):
 
@@ -371,6 +383,7 @@ class Processor(object):
         batch_audio = torch.zeros((batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
+        batch_mfcc = torch.zeros((batch_size, self.num_mfcc, self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 
         def extend_word_seq(lang, words, end_time=None):
@@ -444,6 +457,7 @@ class Processor(object):
                 target_seq = convert_pose_seq_to_dir_vec(pose_seq)
                 target_seq = target_seq.reshape(target_seq.shape[0], -1)
                 target_seq -= np.reshape(self.s2eg_config_args.mean_dir_vec, -1)
+                mfcc_features = torch.from_numpy(mfcc(audio, sr=self.audio_sr, n_mfcc=self.num_mfcc)).float()
                 audio = torch.from_numpy(audio).float()
                 spectrogram = torch.from_numpy(spectrogram)
 
@@ -455,13 +469,15 @@ class Processor(object):
                 batch_target_seq[i] = torch.from_numpy(target_seq).float()
                 batch_audio[i] = audio
                 batch_spectrogram[i] = spectrogram
+                batch_mfcc[i] = mfcc_features / self.mfcc_scale
                 # speaker input
                 if self.test_speaker_model and self.test_speaker_model.__class__.__name__ == 'Vocab':
                     batch_vid_indices[i] =\
                         torch.LongTensor([self.test_speaker_model.word2index[aux_info['vid']]])
 
-        return batch_words, batch_aux_info, batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq,\
-            batch_pose_seq, batch_vec_seq, batch_target_seq, batch_audio, batch_spectrogram, batch_vid_indices
+        return batch_words, batch_aux_info, batch_word_seq_tensor, batch_word_seq_lengths,\
+            batch_extended_word_seq, batch_pose_seq, batch_vec_seq, batch_target_seq, batch_audio,\
+            batch_spectrogram, batch_mfcc, batch_vid_indices
 
     @staticmethod
     def add_noise(data):
@@ -492,7 +508,8 @@ class Processor(object):
         target_poses = convert_dir_vec_to_pose(target_vec)
 
         if out_joint_poses.shape[1] == self.s2eg_config_args.n_poses:
-            diff = out_joint_poses[:, self.s2eg_config_args.n_pre_poses:] - target_poses[:, self.s2eg_config_args.n_pre_poses:]
+            diff = out_joint_poses[:, self.s2eg_config_args.n_pre_poses:] -\
+                target_poses[:, self.s2eg_config_args.n_pre_poses:]
         else:
             diff = out_joint_poses - target_poses[:, self.s2eg_config_args.n_pre_poses:]
         mae_val = np.mean(np.absolute(diff))
@@ -505,7 +522,7 @@ class Processor(object):
 
         return losses_all, joint_mae, accel
 
-    def forward_pass_s2eg(self, in_text, in_audio, target_poses, vid_indices, train,
+    def forward_pass_s2eg(self, in_text, in_audio, in_mfcc, target_poses, vid_indices, train,
                           target_seq=None, words=None, aux_info=None, save_path=None, make_video=False,
                           calculate_metrics=False, losses_all=None, joint_mae=None, accel=None):
         warm_up_epochs = self.s2eg_config_args.loss_warmup
@@ -523,7 +540,7 @@ class Processor(object):
             self.s2eg_dis_optimizer.zero_grad()
 
             # out shape (batch x seq x dim)
-            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
+            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
 
             if use_noisy_target:
                 noise_target = Processor.add_noise(target_poses)
@@ -545,7 +562,7 @@ class Processor(object):
 
         # decoding
         out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq, in_text, in_audio, vid_indices)
-        out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
+        out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
 
         # make a video
         assert not make_video or (make_video and target_seq is not None), \
@@ -615,7 +632,7 @@ class Processor(object):
             else:
                 rand_vids = None
 
-            out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_audio, rand_vids)
+            out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_mfcc, rand_vids)
             beta = 0.05
             pose_l1 = F.smooth_l1_loss(out_dir_vec / beta, out_dir_vec_rand_vid.detach() / beta,
                                        reduction='none') * beta
@@ -666,11 +683,11 @@ class Processor(object):
         batch_s2eg_loss = 0.
         num_batches = 0.
 
-        for word_seq_tensor, word_seq_lengths, extended_word_seq,\
-                pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=True):
+        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq,\
+                vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=True):
             self.s2eg_generator.train()
             self.s2eg_discriminator.train()
-            loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio,
+            loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                                    vec_seq, vid_indices, train=True)
             # Compute statistics
             batch_s2eg_loss += loss_dict['total_loss']
@@ -696,13 +713,13 @@ class Processor(object):
         batch_s2eg_loss = 0.
         num_batches = 0.
 
-        for word_seq_tensor, word_seq_lengths, extended_word_seq, \
-                pose_seq, vec_seq, audio, spectrogram, vid_indices in self.yield_batch(train=False):
+        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq,\
+                vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=False):
             self.s2eg_generator.eval()
             self.s2eg_discriminator.eval()
 
             with torch.no_grad():
-                loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio,
+                loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                                        vec_seq, vid_indices, train=False)
                 # Compute statistics
                 batch_s2eg_loss += loss_dict['total_loss']
@@ -787,11 +804,11 @@ class Processor(object):
         for sample_idx in np.arange(0, samples_to_generate, batch_size):
             samples_curr = min(batch_size, samples_to_generate - sample_idx)
             words, aux_info, word_seq_tensor, word_seq_lengths, extended_word_seq, \
-                pose_seq, vec_seq, target_seq, audio, spectrogram, vid_indices = \
+                pose_seq, vec_seq, target_seq, audio, spectrogram, mfcc_features, vid_indices = \
                 self.return_batch([samples_curr], randomized=randomized)
             with torch.no_grad():
                 loss_dict, losses_all, joint_mae, accel =\
-                    self.forward_pass_s2eg(extended_word_seq, audio,
+                    self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                            vec_seq, vid_indices, train=False,
                                            target_seq=target_seq, words=words, aux_info=aux_info,
                                            save_path=self.args.video_save_path,
@@ -956,6 +973,9 @@ class Processor(object):
                         if sub_div_idx == num_subdivisions - 1:
                             end_padding_duration = audio_sample_length - len(in_audio_np)
                         in_audio_np = np.pad(in_audio_np, (0, audio_sample_length - len(in_audio_np)), 'constant')
+                    in_mfcc = torch.from_numpy(mfcc(in_audio_np,
+                                                    sr=self.audio_sr,
+                                                    n_mfcc=self.num_mfcc)).to(self.device).float() / self.mfcc_scale
                     in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
 
                     # prepare text input
@@ -997,53 +1017,9 @@ class Processor(object):
                     pre_seq_trimodal = pre_seq_trimodal.float().to(self.device)
                     pre_seq = pre_seq.float().to(self.device)
 
-                    mel_spec = ps.logfbank(in_audio_np, audio_fr, nfilt=fft_filter_num, nfft=2048)
-                    delta1 = ps.delta(mel_spec, 2)
-                    delta2 = ps.delta(delta1, 2)
-
-                    data_wav = np.zeros((0, 3, audio_block_size, fft_filter_num))
-                    audio_time = mel_spec.shape[0]
-                    if audio_time <= audio_block_size:
-                        part = mel_spec
-                        delta11 = delta1
-                        delta21 = delta2
-                        part = np.pad(part, ((0, audio_block_size - part.shape[0]), (0, 0)), 'constant',
-                                      constant_values=0)
-                        delta11 = np.pad(delta11, ((0, audio_block_size - delta11.shape[0]), (0, 0)), 'constant',
-                                         constant_values=0)
-                        delta21 = np.pad(delta21, ((0, audio_block_size - delta21.shape[0]), (0, 0)), 'constant',
-                                         constant_values=0)
-                        data_wav = np.concatenate((data_wav,
-                                                   np.expand_dims(
-                                                       np.concatenate((np.expand_dims(part, 0),
-                                                                       np.expand_dims(delta11, 0),
-                                                                       np.expand_dims(delta21, 0)), axis=0), 0)),
-                                                  axis=0)
-                    else:
-                        for begin in np.arange(0, audio_time, 100):
-                            end = begin + audio_block_size
-                            end_from_last = audio_time - begin
-                            if end > audio_time:
-                                break
-
-                            part = mel_spec[begin:end, :]
-                            delta11 = delta1[begin:end, :]
-                            delta21 = delta2[begin:end, :]
-
-                            data_wav = np.concatenate((data_wav,
-                                                       np.expand_dims(
-                                                           np.concatenate((np.expand_dims(part, 0),
-                                                                           np.expand_dims(delta11, 0),
-                                                                           np.expand_dims(delta21, 0)), axis=0), 0)),
-                                                      axis=0)
-                    data_wav = torch.from_numpy(
-                        (data_wav - self.data_loader['ted_wav_min_all'][None, :, None, None]) /
-                        (self.data_loader['ted_wav_max_all'][None, :, None, None] -
-                         self.data_loader['ted_wav_min_all'][None, :, None, None])).float().to(self.device)
-
                     out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq_trimodal,
                                                                        in_text_padded, in_audio, vid_idx)
-                    out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_audio, vid_idx)
+                    out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_mfcc, vid_idx)
 
                     losses_all_trimodal, joint_mae_trimodal, accel_trimodal =\
                         self.push_samples(target_seq, out_dir_vec_trimodal, in_text_padded, in_audio,

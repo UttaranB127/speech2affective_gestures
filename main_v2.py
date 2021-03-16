@@ -120,8 +120,10 @@ train_data_ted, eval_data_ted, test_data_ted = loader.load_ted_db_data(data_path
 data_loader = dict(train_data_s2eg=train_data_ted, eval_data_s2eg=eval_data_ted, test_data_s2eg=test_data_ted)
 pose_dim = 27
 coords = 3
+audio_sr = 16000
+num_mfcc = 13
 
-pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, save_path=base_path)
+pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, audio_sr, num_mfcc)
 
 if args.train_s2eg:
     pr.train()

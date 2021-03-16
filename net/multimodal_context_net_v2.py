@@ -33,6 +33,31 @@ class WavEncoder(nn.Module):
         return out.transpose(1, 2)  # to (batch x seq x dim)
 
 
+class MFCCEncoder(nn.Module):
+    def __init__(self, mfcc_length, out_feature_size):
+        super().__init__()
+        self.conv1 = nn.Conv1d(mfcc_length, 64, 5, padding=2)
+        self.max_pool1 = nn.MaxPool1d(3, stride=2)
+        self.batch_norm1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, 64, 3, padding=1)
+        self.max_pool2 = nn.MaxPool1d(3, stride=2)
+        self.batch_norm2 = nn.BatchNorm1d(64)
+        self.conv3 = nn.Conv1d(64, 32, 3, padding=1)
+        self.max_pool3 = nn.MaxPool1d(3, stride=2, padding=1)
+        self.batch_norm3 = nn.BatchNorm1d(32)
+
+        self.linear1 = nn.Linear(32, out_feature_size)
+
+        self.activation = nn.LeakyReLU(0.3, inplace=True)
+
+    def forward(self, mfcc_data):
+        x_01 = self.activation(self.batch_norm1(self.max_pool1(self.conv1(mfcc_data.permute(0, 2, 1)))))
+        x_02 = self.activation(self.batch_norm2(self.max_pool2(self.conv2(x_01))))
+        x_03 = self.activation(self.batch_norm3(self.max_pool3(self.conv3(x_02))))
+        out = self.activation(self.linear1(x_03.contiguous().view(x_03.shape[0], -1)))
+        return out
+
+
 class TextEncoderTCN(nn.Module):
     """ based on https://github.com/locuslab/TCN/blob/master/TCN/word_cnn/model.py """
     def __init__(self, args, n_words, embed_size=300, pre_trained_embedding=None,
@@ -258,7 +283,7 @@ class ConvDiscriminatorTriModal(nn.Module):
 
 
 class PoseGenerator(nn.Module):
-    def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings, z_obj=None):
+    def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings, mfcc_length, z_obj=None):
         super().__init__()
         self.pre_length = args.n_pre_poses
         self.gen_length = args.n_poses - args.n_pre_poses
@@ -272,7 +297,8 @@ class PoseGenerator(nn.Module):
         else:
             self.in_size = 32 + pose_dim + 1  # audio or text only
 
-        self.audio_encoder = WavEncoder()
+        self.audio_feature_size = 16
+        self.audio_encoder = MFCCEncoder(mfcc_length, self.audio_feature_size)
         self.text_encoder = TextEncoderTCN(args, n_words, word_embed_size, pre_trained_embedding=word_embeddings,
                                            dropout=args.dropout_prob)
 
@@ -303,7 +329,7 @@ class PoseGenerator(nn.Module):
         if torch.cuda.device_count() > 1:
             self.do_flatten_parameters = True
 
-    def forward(self, pre_seq, in_text, in_audio, vid_indices=None):
+    def forward(self, pre_seq, in_text, in_mfcc, vid_indices=None):
         decoder_hidden = None
         if self.do_flatten_parameters:
             self.gru.flatten_parameters()
@@ -311,7 +337,7 @@ class PoseGenerator(nn.Module):
         text_feat_seq = audio_feat_seq = None
         if self.input_context != 'none':
             # audio
-            audio_feat_seq = self.audio_encoder(in_audio)  # output (bs, n_frames, feat_size)
+            audio_feat_seq = self.audio_encoder(in_mfcc)  # output (bs, n_frames, feat_size)
 
             # text
             text_feat_seq, _ = self.text_encoder(in_text)

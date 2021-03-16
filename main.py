@@ -21,7 +21,7 @@ base_path = os.path.dirname(os.path.realpath(__file__))
 data_path = j(base_path, '../../data')
 
 models_ser_path = j(base_path, 'models', 'ser_v1')
-models_s2eg_path = j(base_path, 'models', 's2eg')
+models_s2eg_path = j(base_path, 'models', 's2eg_v1')
 os.makedirs(models_ser_path, exist_ok=True)
 
 

@@ -34,27 +34,23 @@ class WavEncoder(nn.Module):
 
 
 class MFCCEncoder(nn.Module):
-    def __init__(self, mfcc_length, out_feature_size):
+    def __init__(self, mfcc_length, time_steps):
         super().__init__()
         self.conv1 = nn.Conv1d(mfcc_length, 64, 5, padding=2)
-        self.max_pool1 = nn.MaxPool1d(3, stride=2)
         self.batch_norm1 = nn.BatchNorm1d(64)
-        self.conv2 = nn.Conv1d(64, 64, 3, padding=1)
-        self.max_pool2 = nn.MaxPool1d(3, stride=2)
+        self.conv2 = nn.Conv1d(64, 64, 5, padding=2)
         self.batch_norm2 = nn.BatchNorm1d(64)
-        self.conv3 = nn.Conv1d(64, 32, 3, padding=1)
-        self.max_pool3 = nn.MaxPool1d(3, stride=2, padding=1)
-        self.batch_norm3 = nn.BatchNorm1d(32)
-
-        self.linear1 = nn.Linear(32, out_feature_size)
+        self.conv3 = nn.Conv1d(64, 48, 3, padding=1)
+        self.batch_norm3 = nn.BatchNorm1d(48)
+        self.conv4 = nn.Conv1d(48, time_steps, 3, padding=1)
 
         self.activation = nn.LeakyReLU(0.3, inplace=True)
 
     def forward(self, mfcc_data):
-        x_01 = self.activation(self.batch_norm1(self.max_pool1(self.conv1(mfcc_data.permute(0, 2, 1)))))
-        x_02 = self.activation(self.batch_norm2(self.max_pool2(self.conv2(x_01))))
-        x_03 = self.activation(self.batch_norm3(self.max_pool3(self.conv3(x_02))))
-        out = self.activation(self.linear1(x_03.contiguous().view(x_03.shape[0], -1)))
+        x_01 = self.activation(self.batch_norm1(self.conv1(mfcc_data.permute(0, 2, 1))))
+        x_02 = self.activation(self.batch_norm2(self.conv2(x_01)))
+        x_03 = self.activation(self.batch_norm3(self.conv3(x_02)))
+        out = self.activation(self.conv4(x_03))
         return out
 
 
@@ -283,22 +279,27 @@ class ConvDiscriminatorTriModal(nn.Module):
 
 
 class PoseGenerator(nn.Module):
-    def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings, mfcc_length, z_obj=None):
+    def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings,
+                 num_mfcc, mfcc_length, time_steps, z_obj=None):
         super().__init__()
         self.pre_length = args.n_pre_poses
         self.gen_length = args.n_poses - args.n_pre_poses
         self.z_obj = z_obj
         self.input_context = args.input_context
+        self.mfcc_feature_length = num_mfcc
+        self.text_feature_length = 32
 
         if self.input_context == 'both':
-            self.in_size = 32 + 32 + pose_dim + 1  # audio_feat + text_feat + last pose + constraint bit
+            # audio_feat + text_feat + last pose + constraint bit
+            self.in_size = self.mfcc_feature_length + self.text_feature_length + pose_dim + 1
+        elif self.input_context == 'audio':
+            self.in_size = self.mfcc_feature_length + pose_dim + 1  # audio only
+        elif self.input_context == 'text':
+            self.in_size = self.text_feature_length + pose_dim + 1  # text only
         elif self.input_context == 'none':
             self.in_size = pose_dim + 1
-        else:
-            self.in_size = 32 + pose_dim + 1  # audio or text only
 
-        self.audio_feature_size = 16
-        self.audio_encoder = MFCCEncoder(mfcc_length, self.audio_feature_size)
+        self.audio_encoder = MFCCEncoder(mfcc_length, time_steps)
         self.text_encoder = TextEncoderTCN(args, n_words, word_embed_size, pre_trained_embedding=word_embeddings,
                                            dropout=args.dropout_prob)
 
@@ -341,7 +342,10 @@ class PoseGenerator(nn.Module):
 
             # text
             text_feat_seq, _ = self.text_encoder(in_text)
-            assert(audio_feat_seq.shape[1] == text_feat_seq.shape[1])
+            assert(audio_feat_seq.shape[1] == text_feat_seq.shape[1]),\
+                'Audio and text features must have the same number of time steps. ' \
+                'Found time steps: audio features: {}, text features: {}.'.format(audio_feat_seq.shape[1],
+                                                                                  text_feat_seq.shape[1])
 
         # z vector; speaker embedding or random noise
         if self.z_obj:

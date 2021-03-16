@@ -135,7 +135,9 @@ class Processor(object):
                                             n_words=self.lang_model.n_words,
                                             word_embed_size=self.s2eg_config_args.wordembed_dim,
                                             word_embeddings=self.lang_model.word_embedding_weights,
+                                            num_mfcc=self.num_mfcc,
                                             mfcc_length=self.mfcc_length,
+                                            time_steps=self.time_steps,
                                             z_obj=self.train_speaker_model)
         self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
         self.evaluator = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim, self.lang_model, self.device)

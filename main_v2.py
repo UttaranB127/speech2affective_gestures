@@ -52,7 +52,7 @@ parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
 parser.add_argument('--s2eg-load-last-best', type=bool, default=True, metavar='S2EG-LB',
                     help='load the most recent best model for s2eg (default: True)')
-parser.add_argument('--batch-size', type=int, default=128, metavar='B',
+parser.add_argument('--batch-size', type=int, default=512, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
@@ -88,7 +88,7 @@ parser.add_argument('--recons-reg', type=float, default=1.2, metavar='RCR',
                     help='regularization for reconstruction loss (default: 1.2)')
 parser.add_argument('--eval-interval', type=int, default=1, metavar='EI',
                     help='interval after which model is evaluated (default: 1)')
-parser.add_argument('--log-interval', type=int, default=100, metavar='LI',
+parser.add_argument('--log-interval', type=int, default=200, metavar='LI',
                     help='interval after which log is printed (default: 100)')
 parser.add_argument('--save-interval', type=int, default=10, metavar='SI',
                     help='interval after which model is saved (default: 10)')

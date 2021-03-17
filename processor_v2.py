@@ -661,6 +661,7 @@ class Processor(object):
         num_batches = self.num_train_samples // self.args.batch_size + 1
 
         start_time = time.time()
+        self.meta_info['iter'] = 0
         for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
             vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=True):
             loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
@@ -693,6 +694,7 @@ class Processor(object):
         num_batches = self.num_eval_samples // self.args.batch_size + 1
 
         start_time = time.time()
+        self.meta_info['iter'] = 0
         for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
             vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=False):
             with torch.no_grad():

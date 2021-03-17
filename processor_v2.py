@@ -675,7 +675,7 @@ class Processor(object):
             self.show_iter_info()
 
             self.meta_info['iter'] += 1
-            print('\riter {:>3}/{} took {:>4} seconds'.
+            print('\riter {:>3}/{} took {:>4} seconds\t'.
                   format(self.meta_info['iter'], num_batches, int(np.ceil(time.time() - start_time))), end='')
 
         batch_s2eg_loss /= num_batches
@@ -709,7 +709,7 @@ class Processor(object):
                 self.show_iter_info()
 
             self.meta_info['iter'] += 1
-            print('\riter {:>3}/{} took {:>4} seconds'.
+            print('\riter {:>3}/{} took {:>4} seconds\t'.
                   format(self.meta_info['iter'], num_batches, int(np.ceil(time.time() - start_time))), end='')
 
         batch_s2eg_loss /= num_batches

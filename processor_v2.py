@@ -306,6 +306,7 @@ class Processor(object):
             samples.append(sample)
 
         for p in range(pseudo_passes):
+            start_time = time.time()
             rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
             with data_s2eg.lmdb_env.begin(write=False) as txn:
                 threads = [[] for _ in range(len(rand_keys))]
@@ -361,6 +362,7 @@ class Processor(object):
                     if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
                         batch_vid_indices[i] = \
                             torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
+            print('\rpseudo pass {:>3} took {:.3f} seconds\t'.format(p, time.time() - start_time), end='')
             yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq, batch_pose_seq, \
                   batch_vec_seq, batch_audio, batch_spectrogram, batch_mfcc, batch_vid_indices
 

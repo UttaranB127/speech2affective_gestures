@@ -221,8 +221,8 @@ class Processor(object):
 
     def show_iter_info(self):
 
-        print()
         if self.meta_info['iter'] % self.args.log_interval == 0:
+            print()
             info = '\tIter {} Done.'.format(self.meta_info['iter'])
             for k, v in self.iter_info.items():
                 if isinstance(v, float):

@@ -221,6 +221,7 @@ class Processor(object):
 
     def show_iter_info(self):
 
+        print()
         if self.meta_info['iter'] % self.args.log_interval == 0:
             info = '\tIter {} Done.'.format(self.meta_info['iter'])
             for k, v in self.iter_info.items():
@@ -351,7 +352,6 @@ class Processor(object):
                     batch_vid_indices[_i] = \
                         torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
 
-        start_time = time.time()
         for p in range(pseudo_passes):
             rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
             with data_s2eg.lmdb_env.begin(write=False) as txn:
@@ -361,10 +361,8 @@ class Processor(object):
                     threads[i].start()
                 for i in range(len(rand_keys)):
                     threads[i].join()
-            print('\rpseudo pass {:>3} took {:>4} seconds\t'.format(p,
-                                                                    int(np.ceil(time.time() - start_time))), end='')
             yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq, batch_pose_seq, \
-                  batch_vec_seq, batch_audio, batch_spectrogram, batch_mfcc, batch_vid_indices
+                batch_vec_seq, batch_audio, batch_spectrogram, batch_mfcc, batch_vid_indices
 
     def return_batch(self, batch_size, randomized=True):
 
@@ -453,8 +451,8 @@ class Processor(object):
                         torch.LongTensor([self.test_speaker_model.word2index[aux_info['vid']]])
 
         return batch_words, batch_aux_info, batch_word_seq_tensor, batch_word_seq_lengths, \
-               batch_extended_word_seq, batch_pose_seq, batch_vec_seq, batch_target_seq, batch_audio, \
-               batch_spectrogram, batch_mfcc, batch_vid_indices
+            batch_extended_word_seq, batch_pose_seq, batch_vec_seq, batch_target_seq, batch_audio, \
+            batch_spectrogram, batch_mfcc, batch_vid_indices
 
     @staticmethod
     def add_noise(data):
@@ -655,13 +653,14 @@ class Processor(object):
             loss_dict['total_loss'] += loss_dict[loss]
         return loss_dict, losses_all, joint_mae, accel
 
-    def per_train(self):
+    def per_train_epoch(self):
 
         self.s2eg_generator.train()
         self.s2eg_discriminator.train()
         batch_s2eg_loss = 0.
-        num_batches = 0.
+        num_batches = self.num_train_samples // self.args.batch_size + 1
 
+        start_time = time.time()
         for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
             vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=True):
             loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
@@ -675,7 +674,8 @@ class Processor(object):
             self.show_iter_info()
 
             self.meta_info['iter'] += 1
-            num_batches += 1
+            print('\riter {:>3}/{} took {:>4} seconds'.
+                  format(self.meta_info['iter'], num_batches, int(np.ceil(time.time() - start_time))), end='')
 
         batch_s2eg_loss /= num_batches
         self.epoch_info['mean_s2eg_loss'] = batch_s2eg_loss
@@ -685,13 +685,14 @@ class Processor(object):
 
         self.adjust_lr_s2eg()
 
-    def per_eval(self):
+    def per_eval_epoch(self):
 
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
         batch_s2eg_loss = 0.
-        num_batches = 0.
+        num_batches = self.num_eval_samples // self.args.batch_size + 1
 
+        start_time = time.time()
         for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
             vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=False):
             with torch.no_grad():
@@ -706,7 +707,8 @@ class Processor(object):
                 self.show_iter_info()
 
             self.meta_info['iter'] += 1
-            num_batches += 1
+            print('\riter {:>3}/{} took {:>4} seconds'.
+                  format(self.meta_info['iter'], num_batches, int(np.ceil(time.time() - start_time))), end='')
 
         batch_s2eg_loss /= num_batches
         self.epoch_info['mean_s2eg_loss'] = batch_s2eg_loss
@@ -741,14 +743,14 @@ class Processor(object):
 
             # training
             self.io.print_log('S2EG training epoch: {}'.format(epoch))
-            self.per_train()
+            self.per_train_epoch()
             self.io.print_log('Done.')
 
             # evaluation
             if (epoch % self.args.eval_interval == 0) or (
                     epoch + 1 == self.args.num_epoch):
                 self.io.print_log('S2EG eval epoch: {}'.format(epoch))
-                self.per_eval()
+                self.per_eval_epoch()
                 self.io.print_log('Done.')
 
             # save model and weights

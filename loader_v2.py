@@ -532,7 +532,22 @@ def download_clips(vid_name, start_time, end_time, start_frame, end_frame, save_
     #       .format(partition, key_idx + 1, num_keys, 100. * (key_idx + 1) / num_keys), end='')
 
 
-def load_ted_db_data(_path, config_args):
+def save_as_npz(dataset, part_name):
+    with dataset.lmdb_env.begin(write=False) as txn:
+        for key, value in txn.cursor():
+            word_seq, pose_seq_np, vec_seq_np, audio_np,\
+                spectrogram_np, mfcc_features_np, aux_info = pyarrow.deserialize(value)
+            np.savez_compressed('../../data/ted_db/individual/{}/{:06d}.npz'.format(part_name,
+                                                                                    int(key)),
+                                word_seq=word_seq,
+                                pose_seq=pose_seq_np,
+                                vec_seq=vec_seq_np, audio=audio_np, spectrogram=spectrogram_np,
+                                mfcc_features=mfcc_features_np, aux_info=aux_info)
+            print('\rSaved key {:06d}.'.format(int(key)), end='')
+    print()
+
+
+def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
 
     # load clips and make gestures
     mean_dir_vec = np.array(config_args.mean_dir_vec).reshape(-1, 3)
@@ -574,6 +589,11 @@ def load_ted_db_data(_path, config_args):
     train_dataset.set_lang_model(lang_model)
     eval_dataset.set_lang_model(lang_model)
     test_dataset.set_lang_model(lang_model)
+
+    if not ted_db_npz_already_processed:
+        save_as_npz(train_dataset, 'train')
+        save_as_npz(train_dataset, 'eval')
+        save_as_npz(train_dataset, 'test')
 
     return train_dataset, eval_dataset, test_dataset
 

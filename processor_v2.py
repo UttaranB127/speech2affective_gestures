@@ -7,6 +7,7 @@ import os
 import pickle
 import pyarrow
 import python_speech_features as ps
+import threading
 import time
 import torch
 import torch.optim as optim
@@ -27,7 +28,6 @@ from utils.data_preprocessor import DataPreprocessor
 from utils.gen_utils import create_video_and_save
 from utils import losses
 from utils.ted_db_utils import *
-
 
 torch.manual_seed(1234)
 
@@ -73,8 +73,8 @@ def get_epoch_and_loss(path_to_model_files, epoch='best'):
     if found_model is None:
         return '', None, np.inf
     all_underscores = list(find_all_substr(found_model, '_'))
-    return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]),\
-        float(found_model[all_underscores[2] + 1:all_underscores[3]])
+    return found_model, int(found_model[all_underscores[0] + 1:all_underscores[1]]), \
+           float(found_model[all_underscores[2] + 1:all_underscores[3]])
 
 
 class Processor(object):
@@ -149,18 +149,18 @@ class Processor(object):
             self.s2eg_generator.to(self.device)
             self.s2eg_discriminator.to(self.device)
 
-        self.train_samples = self.data_loader['train_data_s2eg'].n_samples
-        self.eval_samples = self.data_loader['eval_data_s2eg'].n_samples
-        self.test_samples = self.data_loader['test_data_s2eg'].n_samples
-        self.total_samples = self.train_samples + self.eval_samples + self.test_samples
+        self.num_train_samples = self.data_loader['train_data_s2eg'].n_samples
+        self.num_eval_samples = self.data_loader['eval_data_s2eg'].n_samples
+        self.num_test_samples = self.data_loader['test_data_s2eg'].n_samples
+        self.num_total_samples = self.num_train_samples + self.num_eval_samples + self.num_test_samples
         if self.args.train_s2eg:
             print('Total s2eg training data:\t\t{:>6} ({:.2f}%)'.format(
-                self.train_samples, 100. * self.train_samples / self.total_samples))
-            print('Total s2eg evaluation data:\t\t{:>6} ({:.2f}%)'.format(
-                self.eval_samples, 100. * self.eval_samples / self.total_samples))
-            print('Total s2eg testing data:\t\t{:>6} ({:.2f}%)'.format(
-                self.test_samples, 100. * self.test_samples / self.total_samples))
+                self.num_train_samples, 100. * self.num_train_samples / self.num_total_samples))
             print('Training s2eg with batch size:\t{:>6}'.format(self.args.batch_size))
+        print('Total s2eg evaluation data:\t\t{:>6} ({:.2f}%)'.format(
+            self.num_eval_samples, 100. * self.num_eval_samples / self.num_total_samples))
+        print('Total s2eg testing data:\t\t{:>6} ({:.2f}%)'.format(
+            self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))
 
         self.lr_s2eg_gen = self.s2eg_config_args.learning_rate
         self.lr_s2eg_dis = self.s2eg_config_args.learning_rate * self.s2eg_config_args.discriminator_lr_weight
@@ -182,7 +182,7 @@ class Processor(object):
         return data, poses, quat, trans, affs
 
     def load_model_at_epoch(self, epoch='best'):
-        model_name, self.best_s2eg_loss_epoch, self.best_s2eg_loss =\
+        model_name, self.best_s2eg_loss_epoch, self.best_s2eg_loss = \
             get_epoch_and_loss(self.args.work_dir_s2eg, epoch=epoch)
         model_found = False
         try:
@@ -253,10 +253,10 @@ class Processor(object):
 
         if train:
             data_s2eg = self.data_loader['train_data_s2eg']
-            num_data = self.train_samples
+            num_data = self.num_train_samples
         else:
             data_s2eg = self.data_loader['eval_data_s2eg']
-            num_data = self.eval_samples
+            num_data = self.num_eval_samples
 
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
         prob_dist = np.ones(num_data) / float(num_data)
@@ -297,19 +297,29 @@ class Processor(object):
             indexes.append(lang.EOS_token)
             return torch.Tensor(indexes).long()
 
+        samples = []
+
+        def load_from_txn(_k):
+            key = '{:010}'.format(_k).encode('ascii')
+            sample = txn.get(key)
+            sample = pyarrow.deserialize(sample)
+            samples.append(sample)
+
         for p in range(pseudo_passes):
             rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
+            with data_s2eg.lmdb_env.begin(write=False) as txn:
+                threads = [[] for _ in range(len(rand_keys))]
+                for i, k in enumerate(rand_keys):
+                    threads[i] = threading.Thread(target=load_from_txn, args=[k])
+                    threads[i].start()
+                for i in range(len(rand_keys)):
+                    threads[i].join()
             for i, k in enumerate(rand_keys):
+                word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = samples[i]
 
-                with data_s2eg.lmdb_env.begin(write=False) as txn:
-                    key = '{:010}'.format(k).encode('ascii')
-                    sample = txn.get(key)
-                    sample = pyarrow.deserialize(sample)
-                    word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-
-                    # vid_name = sample[-1]['vid']
-                    # clip_start = str(sample[-1]['start_time'])
-                    # clip_end = str(sample[-1]['end_time'])
+                # vid_name = sample[-1]['vid']
+                # clip_start = str(sample[-1]['start_time'])
+                # clip_end = str(sample[-1]['end_time'])
 
                 duration = aux_info['end_time'] - aux_info['start_time']
                 do_clipping = True
@@ -345,15 +355,14 @@ class Processor(object):
                 # speaker input
                 if train:
                     if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
-                        batch_vid_indices[i] =\
+                        batch_vid_indices[i] = \
                             torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
                 else:
                     if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
-                        batch_vid_indices[i] =\
+                        batch_vid_indices[i] = \
                             torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
-
-            yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq, batch_pose_seq,\
-                batch_vec_seq, batch_audio, batch_spectrogram, batch_mfcc, batch_vid_indices
+            yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq, batch_pose_seq, \
+                  batch_vec_seq, batch_audio, batch_spectrogram, batch_mfcc, batch_vid_indices
 
     def return_batch(self, batch_size, randomized=True):
 
@@ -364,9 +373,9 @@ class Processor(object):
             batch_size = len(batch_size)
         else:
             batch_size = batch_size[0]
-            prob_dist = np.ones(self.test_samples) / float(self.test_samples)
+            prob_dist = np.ones(self.num_test_samples) / float(self.num_test_samples)
             if randomized:
-                rand_keys = np.random.choice(self.test_samples, size=batch_size, replace=False, p=prob_dist)
+                rand_keys = np.random.choice(self.num_test_samples, size=batch_size, replace=False, p=prob_dist)
             else:
                 rand_keys = np.arange(batch_size)
 
@@ -473,12 +482,12 @@ class Processor(object):
                 batch_mfcc[i] = mfcc_features
                 # speaker input
                 if self.test_speaker_model and self.test_speaker_model.__class__.__name__ == 'Vocab':
-                    batch_vid_indices[i] =\
+                    batch_vid_indices[i] = \
                         torch.LongTensor([self.test_speaker_model.word2index[aux_info['vid']]])
 
-        return batch_words, batch_aux_info, batch_word_seq_tensor, batch_word_seq_lengths,\
-            batch_extended_word_seq, batch_pose_seq, batch_vec_seq, batch_target_seq, batch_audio,\
-            batch_spectrogram, batch_mfcc, batch_vid_indices
+        return batch_words, batch_aux_info, batch_word_seq_tensor, batch_word_seq_lengths, \
+               batch_extended_word_seq, batch_pose_seq, batch_vec_seq, batch_target_seq, batch_audio, \
+               batch_spectrogram, batch_mfcc, batch_vid_indices
 
     @staticmethod
     def add_noise(data):
@@ -509,8 +518,8 @@ class Processor(object):
         target_poses = convert_dir_vec_to_pose(target_vec)
 
         if out_joint_poses.shape[1] == self.s2eg_config_args.n_poses:
-            diff = out_joint_poses[:, self.s2eg_config_args.n_pre_poses:] -\
-                target_poses[:, self.s2eg_config_args.n_pre_poses:]
+            diff = out_joint_poses[:, self.s2eg_config_args.n_pre_poses:] - \
+                   target_poses[:, self.s2eg_config_args.n_pre_poses:]
         else:
             diff = out_joint_poses - target_poses[:, self.s2eg_config_args.n_pre_poses:]
         mae_val = np.mean(np.absolute(diff))
@@ -624,7 +633,7 @@ class Processor(object):
         gen_error = -torch.mean(torch.log(dis_output + 1e-8))
         kld = div_reg = None
 
-        if (self.s2eg_config_args.z_type == 'speaker' or self.s2eg_config_args.z_type == 'random') and\
+        if (self.s2eg_config_args.z_type == 'speaker' or self.s2eg_config_args.z_type == 'random') and \
                 self.s2eg_config_args.loss_reg_weight > 0.0:
             if self.s2eg_config_args.z_type == 'speaker':
                 # enforcing divergent gestures btw original vid and other vid
@@ -686,8 +695,8 @@ class Processor(object):
         batch_s2eg_loss = 0.
         num_batches = 0.
 
-        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq,\
-                vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=True):
+        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
+            vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=True):
             loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                                    vec_seq, vid_indices, train=True)
             # Compute statistics
@@ -716,9 +725,8 @@ class Processor(object):
         batch_s2eg_loss = 0.
         num_batches = 0.
 
-        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq,\
-                vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=False):
-
+        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
+            vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=False):
             with torch.no_grad():
                 loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                                        vec_seq, vid_indices, train=False)
@@ -781,7 +789,7 @@ class Processor(object):
                 torch.save({'gen_model_dict': self.s2eg_generator.state_dict(),
                             'dis_model_dict': self.s2eg_discriminator.state_dict()},
                            jn(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
-                                  format(epoch, self.epoch_info['mean_s2eg_loss'])))
+                              format(epoch, self.epoch_info['mean_s2eg_loss'])))
 
     def generate_gestures(self, samples_to_generate=10, randomized=True,
                           load_saved_model=True, ser_epoch='best', s2eg_epoch='best'):
@@ -805,10 +813,10 @@ class Processor(object):
         for sample_idx in np.arange(0, samples_to_generate, batch_size):
             samples_curr = min(batch_size, samples_to_generate - sample_idx)
             words, aux_info, word_seq_tensor, word_seq_lengths, extended_word_seq, \
-                pose_seq, vec_seq, target_seq, audio, spectrogram, mfcc_features, vid_indices = \
+            pose_seq, vec_seq, target_seq, audio, spectrogram, mfcc_features, vid_indices = \
                 self.return_batch([samples_curr], randomized=randomized)
             with torch.no_grad():
-                loss_dict, losses_all, joint_mae, accel =\
+                loss_dict, losses_all, joint_mae, accel = \
                     self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                            vec_seq, vid_indices, train=False,
                                            target_seq=target_seq, words=words, aux_info=aux_info,
@@ -915,13 +923,13 @@ class Processor(object):
                 # pre seq
                 pre_seq_trimodal = torch.zeros((1, n_frames, self.pose_dim + 1))
                 if seed_seq is not None:
-                    pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] =\
+                    pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                         torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
                     pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for seed poses
 
                 pre_seq = torch.zeros((1, n_frames, self.pose_dim + 1))
                 if seed_seq is not None:
-                    pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] =\
+                    pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                         torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
                     pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for seed poses
 
@@ -932,8 +940,8 @@ class Processor(object):
 
                 # divide into synthesize units and do synthesize
                 unit_time = self.s2eg_config_args.n_poses / self.s2eg_config_args.motion_resampling_framerate
-                stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) /\
-                    self.s2eg_config_args.motion_resampling_framerate
+                stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) / \
+                              self.s2eg_config_args.motion_resampling_framerate
                 if clip_length < unit_time:
                     num_subdivisions = 1
                 else:
@@ -954,8 +962,8 @@ class Processor(object):
                 print('Sample {} of {}'.format(sample_idx + 1, samples_to_generate))
                 print('Subdivisions\t|\tUnit Time\t|\tClip Length\t|\tStride Time\t|\tAudio Sample Length')
                 print('{}\t\t\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{}'.format(num_subdivisions, unit_time,
-                                                                                          clip_length, stride_time,
-                                                                                          audio_sample_length))
+                                                                                      clip_length, stride_time,
+                                                                                      audio_sample_length))
 
                 out_dir_vec_trimodal = None
                 out_dir_vec = None
@@ -1002,12 +1010,13 @@ class Processor(object):
                         start_idx = n_frames * sub_div_idx
                         end_idx = min(n_frames_total, n_frames * (sub_div_idx + 1))
                         target_seq[0, :(end_idx - start_idx)] = torch.from_numpy(
-                            target_dir_vec[start_idx:end_idx])\
+                            target_dir_vec[start_idx:end_idx]) \
                             .unsqueeze(0).float().to(self.device)
 
                         pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                             out_dir_vec_trimodal.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
-                        pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
+                        pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses,
+                        -1] = 1  # indicating bit for constraints
 
                         pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                             out_dir_vec.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
@@ -1020,7 +1029,7 @@ class Processor(object):
                                                                        in_text_padded, in_audio, vid_idx)
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_mfcc, vid_idx)
 
-                    losses_all_trimodal, joint_mae_trimodal, accel_trimodal =\
+                    losses_all_trimodal, joint_mae_trimodal, accel_trimodal = \
                         self.push_samples(target_seq, out_dir_vec_trimodal, in_text_padded, in_audio,
                                           losses_all_trimodal, joint_mae_trimodal, accel_trimodal)
                     losses_all, joint_mae, accel = self.push_samples(target_seq, out_dir_vec, in_text_padded, in_audio,
@@ -1062,23 +1071,25 @@ class Processor(object):
                 # fade out to the mean pose
                 if fade_out:
                     n_smooth = self.s2eg_config_args.n_pre_poses
-                    start_frame = len(out_dir_vec_trimodal) -\
-                        int(end_padding_duration / audio_sr * self.s2eg_config_args.motion_resampling_framerate)
+                    start_frame = len(out_dir_vec_trimodal) - \
+                                  int(
+                                      end_padding_duration / audio_sr * self.s2eg_config_args.motion_resampling_framerate)
                     end_frame = start_frame + n_smooth * 2
                     if len(out_dir_vec_trimodal) < end_frame:
                         out_dir_vec_trimodal = np.pad(out_dir_vec_trimodal,
                                                       [(0, end_frame - len(out_dir_vec_trimodal)), (0, 0)],
                                                       mode='constant')
-                    out_dir_vec_trimodal[end_frame - n_smooth:] =\
+                    out_dir_vec_trimodal[end_frame - n_smooth:] = \
                         np.zeros(self.pose_dim)  # fade out to mean poses
 
                     n_smooth = self.s2eg_config_args.n_pre_poses
-                    start_frame = len(out_dir_vec) -\
-                        int(end_padding_duration / audio_sr * self.s2eg_config_args.motion_resampling_framerate)
+                    start_frame = len(out_dir_vec) - \
+                                  int(
+                                      end_padding_duration / audio_sr * self.s2eg_config_args.motion_resampling_framerate)
                     end_frame = start_frame + n_smooth * 2
                     if len(out_dir_vec) < end_frame:
                         out_dir_vec = np.pad(out_dir_vec, [(0, end_frame - len(out_dir_vec)), (0, 0)], mode='constant')
-                    out_dir_vec[end_frame - n_smooth:] =\
+                    out_dir_vec[end_frame - n_smooth:] = \
                         np.zeros(self.pose_dim)  # fade out to mean poses
 
                     # interpolation

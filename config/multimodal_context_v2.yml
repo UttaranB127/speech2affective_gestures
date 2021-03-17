@@ -27,7 +27,7 @@ input_context: both  # both, audio, text, none
 # train params
 epochs: 100
 batch_size: 128
-learning_rate: 1e-4
+learning_rate: 5e-4
 loss_regression_weight: 500
 loss_gan_weight: 5.0
 loss_warmup: 10

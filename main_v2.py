@@ -132,3 +132,42 @@ if args.train_s2eg:
 
 # pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
 #                                  randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+
+# generate a random audio file
+# from scipy.io.wavfile import write
+# data = np.random.uniform(-1, 1, 44100)
+# scaled = np.int16(data/np.max(np.abs(data)) * 32767)
+# write('test.wav', 44100, scaled)
+
+# word_seq_part_1 = dict.fromkeys([str(k).zfill(6) for k in range(self.num_train_samples // 2)])
+# word_seq_part_2 = dict.fromkeys([str(k).zfill(6) for k in range(self.num_train_samples // 2)])
+# pose_seq_all = np.zeros((self.num_train_samples, pose_seq.shape[0], pose_seq.shape[1], pose_seq.shape[2]))
+# vec_seq_all = np.zeros((self.num_train_samples, vec_seq.shape[0], vec_seq.shape[1], vec_seq.shape[2]))
+# audio_all = np.zeros((self.num_train_samples, audio.shape[0]), dtype=np.int16)
+# audio_max_all =np.zeros(self.num_train_samples)
+# spectrogram_all = np.zeros((self.num_train_samples, spectrogram.shape[0], spectrogram.shape[1]))
+# mfcc_features_all = np.zeros((self.num_train_samples, mfcc_features.shape[0], mfcc_features.shape[1]))
+# half = self.num_train_samples // 2
+# aux_info_part_1 = dict.fromkeys([str(k).zfill(6) for k in range(half)])
+# aux_info_part_2 = dict.fromkeys([str(k).zfill(6) for k in range(half)])
+# for k in range(self.num_train_samples):
+#     with data_s2eg.lmdb_env.begin(write=False) as txn:
+#         key = '{:010}'.format(k).encode('ascii')
+#         sample = txn.get(key)
+#         sample = pyarrow.deserialize(sample)
+#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
+#     pose_seq_all[k] = pose_seq
+#     vec_seq_all[k] = vec_seq
+#     audio_max_all[k] = np.max(np.abs(audio))
+#     audio_all[k] = np.int16(audio/audio_max_all[k] * 32767)
+#     spectrogram_all[k] = spectrogram
+#     mfcc_features_all[k] = mfcc_features
+#
+#     if k < half:
+#         word_seq_part_1[str(k).zfill(6)] = word_seq
+#         aux_info_part_1[str(k).zfill(6)] = aux_info
+#     else:
+#         word_seq_part_2[str(k - half).zfill(6)] = word_seq
+#         aux_info_part_2[str(k - half).zfill(6)] = aux_info
+#     print('\rstored key {}'.format(k), end='')
+# print()

@@ -237,6 +237,43 @@ class Processor(object):
     def count_parameters(self):
         return sum(p.numel() for p in self.s2eg_generator.parameters() if p.requires_grad)
 
+    @staticmethod
+    def extend_word_seq(n_frames, lang, remove_word_timing, words, aux_info, end_time=None):
+        if end_time is None:
+            end_time = aux_info['end_time']
+        frame_duration = (end_time - aux_info['start_time']) / n_frames
+
+        extended_word_indices = np.zeros(n_frames)  # zero is the index of padding token
+        if remove_word_timing:
+            n_words = 0
+            for word in words:
+                idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
+                if idx < n_frames:
+                    n_words += 1
+            space = int(n_frames / (n_words + 1))
+            for word_idx in range(n_words):
+                idx = (word_idx + 1) * space
+                extended_word_indices[idx] = lang.get_word_index(words[word_idx][0])
+        else:
+            prev_idx = 0
+            for word in words:
+                idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
+                if idx < n_frames:
+                    extended_word_indices[idx] = lang.get_word_index(word[0])
+                    # extended_word_indices[prev_idx:idx+1] = lang.get_word_index(word[0])
+                    prev_idx = idx
+        return torch.Tensor(extended_word_indices).long()
+
+    @staticmethod
+    def words_to_tensor(lang, words, end_time=None):
+        indexes = [lang.SOS_token]
+        for word in words:
+            if end_time is not None and word[1] > end_time:
+                break
+            indexes.append(lang.get_word_index(word[0]))
+        indexes.append(lang.EOS_token)
+        return torch.Tensor(indexes).long()
+
     def yield_batch(self, train):
         batch_word_seq_tensor = torch.zeros((self.args.batch_size, self.time_steps)).long().to(self.device)
         batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().to(self.device)
@@ -260,44 +297,6 @@ class Processor(object):
 
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
         prob_dist = np.ones(num_data) / float(num_data)
-
-        def extend_word_seq(lang, words, end_time=None):
-            n_frames = data_s2eg.n_poses
-            if end_time is None:
-                end_time = aux_info['end_time']
-            frame_duration = (end_time - aux_info['start_time']) / n_frames
-
-            extended_word_indices = np.zeros(n_frames)  # zero is the index of padding token
-            if data_s2eg.remove_word_timing:
-                n_words = 0
-                for word in words:
-                    idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
-                    if idx < n_frames:
-                        n_words += 1
-                space = int(n_frames / (n_words + 1))
-                for word_idx in range(n_words):
-                    idx = (word_idx + 1) * space
-                    extended_word_indices[idx] = lang.get_word_index(words[word_idx][0])
-            else:
-                prev_idx = 0
-                for word in words:
-                    idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
-                    if idx < n_frames:
-                        extended_word_indices[idx] = lang.get_word_index(word[0])
-                        # extended_word_indices[prev_idx:idx+1] = lang.get_word_index(word[0])
-                        prev_idx = idx
-            return torch.Tensor(extended_word_indices).long()
-
-        def words_to_tensor(lang, words, end_time=None):
-            indexes = [lang.SOS_token]
-            for word in words:
-                if end_time is not None and word[1] > end_time:
-                    break
-                indexes.append(lang.get_word_index(word[0]))
-            indexes.append(lang.EOS_token)
-            return torch.Tensor(indexes).long()
-
-        samples = []
 
         def load_from_txn(_i, _k):
             key = '{:010}'.format(_k).encode('ascii')
@@ -323,8 +322,10 @@ class Processor(object):
                 sample_end_time = None
 
             # to tensors
-            word_seq_tensor = words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-            extended_word_seq = extend_word_seq(data_s2eg.lang_model, word_seq, sample_end_time)
+            word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
+            extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
+                                                          data_s2eg.remove_word_timing, word_seq,
+                                                          aux_info, sample_end_time)
             vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
             pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
             # scaled_audio = np.int16(audio / np.max(np.abs(audio)) * self.audio_length)
@@ -396,42 +397,6 @@ class Processor(object):
                                   self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 
-        def extend_word_seq(lang, words, end_time=None):
-            n_frames = data_s2eg.n_poses
-            if end_time is None:
-                end_time = aux_info['end_time']
-            frame_duration = (end_time - aux_info['start_time']) / n_frames
-
-            extended_word_indices = np.zeros(n_frames)  # zero is the index of padding token
-            if data_s2eg.remove_word_timing:
-                n_words = 0
-                for word in words:
-                    idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
-                    if idx < n_frames:
-                        n_words += 1
-                space = int(n_frames / (n_words + 1))
-                for word_idx in range(n_words):
-                    idx = (word_idx + 1) * space
-                    extended_word_indices[idx] = lang.get_word_index(words[word_idx][0])
-            else:
-                prev_idx = 0
-                for word in words:
-                    idx = max(0, int(np.floor((word[1] - aux_info['start_time']) / frame_duration)))
-                    if idx < n_frames:
-                        extended_word_indices[idx] = lang.get_word_index(word[0])
-                        # extended_word_indices[prev_idx:idx+1] = lang.get_word_index(word[0])
-                        prev_idx = idx
-            return torch.Tensor(extended_word_indices).long()
-
-        def words_to_tensor(lang, words, end_time=None):
-            indexes = [lang.SOS_token]
-            for word in words:
-                if end_time is not None and word[1] > end_time:
-                    break
-                indexes.append(lang.get_word_index(word[0]))
-            indexes.append(lang.EOS_token)
-            return torch.Tensor(indexes).long()
-
         for i, k in enumerate(rand_keys):
 
             if not self.args.train_ser:
@@ -461,8 +426,9 @@ class Processor(object):
                     sample_end_time = None
 
                 # to tensors
-                word_seq_tensor = words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-                extended_word_seq = extend_word_seq(data_s2eg.lang_model, word_seq, sample_end_time)
+                word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
+                extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
+                                                              data_s2eg.remove_word_timing, word_seq, sample_end_time)
                 vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
                 pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
                 target_seq = convert_pose_seq_to_dir_vec(pose_seq)

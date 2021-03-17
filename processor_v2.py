@@ -299,69 +299,67 @@ class Processor(object):
 
         samples = []
 
-        def load_from_txn(_k):
+        def load_from_txn(_i, _k):
             key = '{:010}'.format(_k).encode('ascii')
             sample = txn.get(key)
             sample = pyarrow.deserialize(sample)
-            samples.append(sample)
+            word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
+
+            # vid_name = sample[-1]['vid']
+            # clip_start = str(sample[-1]['start_time'])
+            # clip_end = str(sample[-1]['end_time'])
+
+            duration = aux_info['end_time'] - aux_info['start_time']
+            do_clipping = True
+
+            if do_clipping:
+                sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
+                audio = make_audio_fixed_length(audio, self.audio_length)
+                spectrogram = spectrogram[:, 0:self.spectrogram_length]
+                mfcc_features = mfcc_features[:, 0:self.mfcc_length]
+                vec_seq = vec_seq[0:data_s2eg.n_poses]
+                pose_seq = pose_seq[0:data_s2eg.n_poses]
+            else:
+                sample_end_time = None
+
+            # to tensors
+            word_seq_tensor = words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
+            extended_word_seq = extend_word_seq(data_s2eg.lang_model, word_seq, sample_end_time)
+            vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
+            pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
+            # scaled_audio = np.int16(audio / np.max(np.abs(audio)) * self.audio_length)
+            mfcc_features = torch.from_numpy(mfcc_features).float()
+            audio = torch.from_numpy(audio).float()
+            spectrogram = torch.from_numpy(spectrogram)
+
+            batch_word_seq_tensor[_i, :len(word_seq_tensor)] = word_seq_tensor
+            batch_word_seq_lengths[_i] = len(word_seq_tensor)
+            batch_extended_word_seq[_i] = extended_word_seq
+            batch_pose_seq[_i] = pose_seq
+            batch_vec_seq[_i] = vec_seq
+            batch_audio[_i] = audio
+            batch_spectrogram[_i] = spectrogram
+            batch_mfcc[_i] = mfcc_features
+            # speaker input
+            if train:
+                if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
+                    batch_vid_indices[_i] = \
+                        torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
+            else:
+                if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
+                    batch_vid_indices[_i] = \
+                        torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
 
         start_time = time.time()
         for p in range(pseudo_passes):
             rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
             with data_s2eg.lmdb_env.begin(write=False) as txn:
-                threads = [[] for _ in range(len(rand_keys))]
+                threads = []
                 for i, k in enumerate(rand_keys):
-                    threads[i] = threading.Thread(target=load_from_txn, args=[k])
+                    threads.append(threading.Thread(target=load_from_txn, args=[i, k]))
                     threads[i].start()
                 for i in range(len(rand_keys)):
                     threads[i].join()
-            for i, k in enumerate(rand_keys):
-                word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = samples[i]
-
-                # vid_name = sample[-1]['vid']
-                # clip_start = str(sample[-1]['start_time'])
-                # clip_end = str(sample[-1]['end_time'])
-
-                duration = aux_info['end_time'] - aux_info['start_time']
-                do_clipping = True
-
-                if do_clipping:
-                    sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
-                    audio = make_audio_fixed_length(audio, self.audio_length)
-                    spectrogram = spectrogram[:, 0:self.spectrogram_length]
-                    mfcc_features = mfcc_features[:, 0:self.mfcc_length]
-                    vec_seq = vec_seq[0:data_s2eg.n_poses]
-                    pose_seq = pose_seq[0:data_s2eg.n_poses]
-                else:
-                    sample_end_time = None
-
-                # to tensors
-                word_seq_tensor = words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-                extended_word_seq = extend_word_seq(data_s2eg.lang_model, word_seq, sample_end_time)
-                vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
-                pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
-                # scaled_audio = np.int16(audio / np.max(np.abs(audio)) * self.audio_length)
-                mfcc_features = torch.from_numpy(mfcc_features).float()
-                audio = torch.from_numpy(audio).float()
-                spectrogram = torch.from_numpy(spectrogram)
-
-                batch_word_seq_tensor[i, :len(word_seq_tensor)] = word_seq_tensor
-                batch_word_seq_lengths[i] = len(word_seq_tensor)
-                batch_extended_word_seq[i] = extended_word_seq
-                batch_pose_seq[i] = pose_seq
-                batch_vec_seq[i] = vec_seq
-                batch_audio[i] = audio
-                batch_spectrogram[i] = spectrogram
-                batch_mfcc[i] = mfcc_features
-                # speaker input
-                if train:
-                    if self.train_speaker_model and self.train_speaker_model.__class__.__name__ == 'Vocab':
-                        batch_vid_indices[i] = \
-                            torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
-                else:
-                    if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
-                        batch_vid_indices[i] = \
-                            torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
             print('\rpseudo pass {:>3} took {:>4} seconds\t'.format(p,
                                                                     int(np.ceil(time.time() - start_time))), end='')
             yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq, batch_pose_seq, \

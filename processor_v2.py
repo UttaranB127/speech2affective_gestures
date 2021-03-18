@@ -200,7 +200,7 @@ class Processor(object):
         audio_max_all = np.zeros(num_samples)
         mfcc_features_all = np.zeros((num_samples, 13, self.mfcc_length))
         vid_indices_all = np.zeros(num_samples, dtype=np.int64)
-        print('Caching {} data {:>6}/{}'.format(part, 0, num_samples), end='')
+        print('Caching {} data {:>6}/{}.'.format(part, 0, num_samples), end='')
         for k in range(num_samples):
             with data_s2eg.lmdb_env.begin(write=False) as txn:
                 key = '{:010}'.format(k).encode('ascii')
@@ -245,7 +245,7 @@ class Processor(object):
                 vid_indices_all[k] = \
                     torch.LongTensor([self.test_speaker_model.word2index[aux_info['vid']]])
 
-            print('\rCaching {} data {:>6}/{}'.format(part, k + 1, num_samples), end='')
+            print('\rCaching {} data {:>6}/{}.'.format(part, k + 1, num_samples), end='')
 
         print('\t Storing cache', end='')
         np.savez_compressed(file_name,

@@ -44,19 +44,17 @@ parser.add_argument('-dap', '--dataset-s2eg-already-processed',
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
-parser.add_argument('--add-mirrored', type=bool, default=False, metavar='AM',
-                    help='perform data augmentation by mirroring all the sequences (default: False)')
-parser.add_argument('--train-s2eg', type=bool, default=True, metavar='T-S2EG',
+parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')
 parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
 parser.add_argument('--s2eg-load-last-best', type=bool, default=True, metavar='S2EG-LB',
                     help='load the most recent best model for s2eg (default: True)')
-parser.add_argument('--batch-size', type=int, default=128, metavar='B',
+parser.add_argument('--batch-size', type=int, default=512, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--s2eg-start-epoch', type=int, default=142, metavar='S2EG-SE',
+parser.add_argument('--s2eg-start-epoch', type=int, default=110, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
 parser.add_argument('--s2eg-num-epoch', type=int, default=500, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')
@@ -128,169 +126,8 @@ pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, 
 if args.train_s2eg:
     pr.train()
 
-# pr.generate_gestures(samples_to_generate=len(data_loader['test_data_s2eg_wav']),
-#                      randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
+                     randomized=randomized, ser_epoch='best', s2eg_epoch=110)
 
 # pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
 #                                  randomized=randomized, ser_epoch='best', s2eg_epoch=142)
-
-# generate a random audio file
-# from scipy.io.wavfile import write
-# data = np.random.uniform(-1, 1, 44100)
-# scaled = np.int16(data/np.max(np.abs(data)) * 32767)
-# write('test.wav', 44100, scaled)
-
-# for k in range(1):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-# half = self.num_train_samples // 2
-# word_seq_part_1 = dict.fromkeys([str(k).zfill(6) for k in range(half)])
-# pose_seq_part_1 = np.zeros((half, pose_seq.shape[0], pose_seq.shape[1], pose_seq.shape[2]))
-# vec_seq_part_1 = np.zeros((half, vec_seq.shape[0], vec_seq.shape[1], vec_seq.shape[2]))
-# audio_part_1 = np.zeros((half, audio.shape[0]), dtype=np.int16)
-# audio_max_part_1 = np.zeros(half)
-# mfcc_features_part_1 = np.zeros((half, mfcc_features.shape[0], mfcc_features.shape[1]))
-# aux_info_part_1 = dict.fromkeys([str(k).zfill(6) for k in range(half)])
-# for k in range(half):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-#     pose_seq_part_1[k] = pose_seq
-#     vec_seq_part_1[k] = vec_seq
-#     audio_max_part_1[k] = np.max(np.abs(audio))
-#     audio_part_1[k] = np.int16(audio/audio_max_part_1[k] * 32767)
-#     mfcc_features_part_1[k] = mfcc_features
-#
-#     word_seq_part_1[str(k).zfill(6)] = word_seq
-#     aux_info_part_1[str(k).zfill(6)] = aux_info
-#     print('\rstored key {}'.format(k), end='')
-# print()
-# save_dir = jn('../../data/ted_db/individual/train')
-# os.makedirs(save_dir, exist_ok=True)
-# np.savez_compressed(jn(save_dir, 'part_1.npz'), word_seq=word_seq_part_1, pose_seq=pose_seq_part_1,
-#                     vec_seq=vec_seq_part_1, audio=audio_part_1, audio_max=audio_max_part_1,
-#                     mfcc_features=mfcc_features_part_1, aux_info=aux_info_part_1)
-# print('done')
-
-
-# for k in range(1):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-# half = self.num_train_samples // 2
-# pose_seq_part_2 = np.zeros((half, pose_seq.shape[0], pose_seq.shape[1], pose_seq.shape[2]))
-# vec_seq_part_2 = np.zeros((half, vec_seq.shape[0], vec_seq.shape[1], vec_seq.shape[2]))
-# audio_part_2 = np.zeros((half, audio.shape[0]), dtype=np.int16)
-# audio_max_part_2 = np.zeros(half)
-# spectrogram_part_2 = np.zeros((half, spectrogram.shape[0], spectrogram.shape[1]))
-# mfcc_features_part_2 = np.zeros((half, mfcc_features.shape[0], mfcc_features.shape[1]))
-# word_seq_part_2 = dict.fromkeys([str(k).zfill(6) for k in range(half)])
-# aux_info_part_2 = dict.fromkeys([str(k).zfill(6) for k in range(half)])
-# for k in range(half):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-#     pose_seq_part_2[k - half] = pose_seq
-#     vec_seq_part_2[k - half] = vec_seq
-#     audio_max_part_2[k - half] = np.max(np.abs(audio))
-#     audio_part_2[k - half] = np.int16(audio/audio_max_part_2[k - half] * 32767)
-#     spectrogram_part_2[k - half] = spectrogram
-#     mfcc_features_part_2[k - half] = mfcc_features
-#
-#     word_seq_part_2[str(k - half).zfill(6)] = word_seq
-#     aux_info_part_2[str(k - half).zfill(6)] = aux_info
-#     print('\rstored key {}'.format(k), end='')
-# print()
-# save_dir = jn('../../data/ted_db/individual/train')
-# os.makedirs(save_dir, exist_ok=True)
-# np.savez_compressed(jn(save_dir, 'part_2.npz'), word_seq=word_seq_part_2, pose_seq=pose_seq_part_2,
-#                     vec_seq=vec_seq_part_2, audio=audio_part_2, audio_max=audio_max_part_2,
-#                     mfcc_features=mfcc_features_part_2, aux_info=aux_info_part_2)
-# print('done')
-
-
-# data_s2eg = self.data_loader['train_data_s2eg']
-# for k in range(1):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-#
-# word_seq_all = dict.fromkeys([str(k).zfill(6) for k in range(self.num_train_samples)])
-# pose_seq_all = np.zeros((self.num_train_samples, pose_seq.shape[0], pose_seq.shape[1], pose_seq.shape[2]))
-# vec_seq_all = np.zeros((self.num_train_samples, vec_seq.shape[0], vec_seq.shape[1], vec_seq.shape[2]))
-# audio_all = np.zeros((self.num_train_samples, audio.shape[0]), dtype=np.int16)
-# audio_max_all = np.zeros(self.num_train_samples)
-# mfcc_features_all = np.zeros((self.num_train_samples, mfcc_features.shape[0], mfcc_features.shape[1]))
-# aux_info_all = dict.fromkeys([str(k).zfill(6) for k in range(self.num_train_samples)])
-# for k in range(self.num_train_samples):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-#     pose_seq_all[k] = pose_seq
-#     vec_seq_all[k] = vec_seq
-#     audio_max_all[k] = np.max(np.abs(audio))
-#     audio_all[k] = np.int16(audio/audio_max_all[k] * 32767)
-#     mfcc_features_all[k] = mfcc_features
-#
-#     word_seq_all[str(k).zfill(6)] = word_seq
-#     aux_info_all[str(k).zfill(6)] = aux_info
-#     print('\rstored key {}'.format(k), end='')
-# print()
-# save_dir = jn('../../data/ted_db/npz')
-# os.makedirs(save_dir, exist_ok=True)
-# np.savez_compressed(jn(save_dir, 'train.npz'), word_seq=word_seq_all, pose_seq=pose_seq_all,
-#                     vec_seq=vec_seq_all, audio=audio_all, audio_max=audio_max_all,
-#                     mfcc_features=mfcc_features_all, aux_info=aux_info_all)
-# print('done')
-
-
-# data_s2eg = self.data_loader['eval_data_s2eg']
-# for k in range(1):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-#
-# word_seq_all = dict.fromkeys([str(k).zfill(6) for k in range(self.num_eval_samples)])
-# pose_seq_all = np.zeros((self.num_eval_samples, pose_seq.shape[0], pose_seq.shape[1], pose_seq.shape[2]))
-# vec_seq_all = np.zeros((self.num_eval_samples, vec_seq.shape[0], vec_seq.shape[1], vec_seq.shape[2]))
-# audio_all = np.zeros((self.num_eval_samples, audio.shape[0]), dtype=np.int16)
-# audio_max_all = np.zeros(self.num_eval_samples)
-# mfcc_features_all = np.zeros((self.num_eval_samples, mfcc_features.shape[0], mfcc_features.shape[1]))
-# aux_info_all = dict.fromkeys([str(k).zfill(6) for k in range(self.num_eval_samples)])
-# for k in range(self.num_eval_samples):
-#     with data_s2eg.lmdb_env.begin(write=False) as txn:
-#         key = '{:010}'.format(k).encode('ascii')
-#         sample = txn.get(key)
-#         sample = pyarrow.deserialize(sample)
-#         word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
-#     pose_seq_all[k] = pose_seq
-#     vec_seq_all[k] = vec_seq
-#     audio_max_all[k] = np.max(np.abs(audio))
-#     audio_all[k] = np.int16(audio/audio_max_all[k] * 32767)
-#     mfcc_features_all[k] = mfcc_features
-#
-#     word_seq_all[str(k).zfill(6)] = word_seq
-#     aux_info_all[str(k).zfill(6)] = aux_info
-#     print('\rstored key {}'.format(k), end='')
-# print()
-# save_dir = jn('../../data/ted_db/npz')
-# os.makedirs(save_dir, exist_ok=True)
-# np.savez_compressed(jn(save_dir, 'eval.npz'), word_seq=word_seq_all, pose_seq=pose_seq_all,
-#                     vec_seq=vec_seq_all, audio=audio_all, audio_max=audio_max_all,
-#                     mfcc_features=mfcc_features_all, aux_info=aux_info_all)
-# print('done')

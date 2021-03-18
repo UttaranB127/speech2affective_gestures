@@ -588,18 +588,17 @@ class Processor(object):
 
         for i, k in enumerate(rand_keys):
 
-            if not self.args.train_ser:
-                with data_s2eg.lmdb_env.begin(write=False) as txn:
-                    key = '{:010}'.format(k).encode('ascii')
-                    sample = txn.get(key)
-                    sample = pyarrow.deserialize(sample)
-                    word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
+            with data_s2eg.lmdb_env.begin(write=False) as txn:
+                key = '{:010}'.format(k).encode('ascii')
+                sample = txn.get(key)
+                sample = pyarrow.deserialize(sample)
+                word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
 
-                    # for selected_vi in range(len(word_seq)):  # make start time of input text zero
-                    #     word_seq[selected_vi][1] -= aux_info['start_time']  # start time
-                    #     word_seq[selected_vi][2] -= aux_info['start_time']  # end time
-                    batch_words[i] = [word_seq[i][0] for i in range(len(word_seq))]
-                    batch_aux_info[i] = aux_info
+                # for selected_vi in range(len(word_seq)):  # make start time of input text zero
+                #     word_seq[selected_vi][1] -= aux_info['start_time']  # start time
+                #     word_seq[selected_vi][2] -= aux_info['start_time']  # end time
+                batch_words[i] = [word_seq[i][0] for i in range(len(word_seq))]
+                batch_aux_info[i] = aux_info
 
                 duration = aux_info['end_time'] - aux_info['start_time']
                 do_clipping = True
@@ -617,7 +616,7 @@ class Processor(object):
                 # to tensors
                 word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
                 extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
-                                                              data_s2eg.remove_word_timing, word_seq, sample_end_time)
+                                                              data_s2eg.remove_word_timing, word_seq, aux_info)
                 vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
                 pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
                 target_seq = convert_pose_seq_to_dir_vec(pose_seq)
@@ -966,7 +965,7 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        batch_size = 64
+        batch_size = 2048
 
         losses_all = AverageMeter('loss')
         joint_mae = AverageMeter('mae_on_joint')
@@ -976,7 +975,7 @@ class Processor(object):
         for sample_idx in np.arange(0, samples_to_generate, batch_size):
             samples_curr = min(batch_size, samples_to_generate - sample_idx)
             words, aux_info, word_seq_tensor, word_seq_lengths, extended_word_seq, \
-            pose_seq, vec_seq, target_seq, audio, spectrogram, mfcc_features, vid_indices = \
+                pose_seq, vec_seq, target_seq, audio, spectrogram, mfcc_features, vid_indices = \
                 self.return_batch([samples_curr], randomized=randomized)
             with torch.no_grad():
                 loss_dict, losses_all, joint_mae, accel = \
@@ -984,7 +983,7 @@ class Processor(object):
                                            vec_seq, vid_indices, train=False,
                                            target_seq=target_seq, words=words, aux_info=aux_info,
                                            save_path=self.args.video_save_path,
-                                           make_video=False, calculate_metrics=True,
+                                           make_video=True, calculate_metrics=False,
                                            losses_all=losses_all, joint_mae=joint_mae, accel=accel)
                 end_idx = min(samples_to_generate, sample_idx + batch_size)
 
@@ -1022,7 +1021,7 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        batch_size = 64
+        batch_size = 2048
         mean_dir_vec = np.squeeze(np.array(self.s2eg_config_args.mean_dir_vec))
 
         losses_all_trimodal = AverageMeter('loss')
@@ -1178,8 +1177,8 @@ class Processor(object):
 
                         pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                             out_dir_vec_trimodal.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
-                        pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses,
-                        -1] = 1  # indicating bit for constraints
+                        # indicating bit for constraints
+                        pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
 
                         pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                             out_dir_vec.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]

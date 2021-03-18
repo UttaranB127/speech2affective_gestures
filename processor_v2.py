@@ -545,12 +545,12 @@ class Processor(object):
             else:
                 batch_extended_word_seq = torch.from_numpy(
                     self.eval_samples['extended_word_seq'][rand_keys]).to(self.device)
-                batch_vec_seq = torch.from_numpy(self.eval_samples['vec_seq'][rand_keys]).to(self.device)
+                batch_vec_seq = torch.from_numpy(self.eval_samples['vec_seq'][rand_keys]).float().to(self.device)
                 batch_audio = torch.from_numpy(
                     self.eval_samples['audio'][rand_keys] *
-                    self.eval_samples['audio_max'][rand_keys, None] / 32767).to(self.device)
+                    self.eval_samples['audio_max'][rand_keys, None] / 32767).float().to(self.device)
                 batch_mfcc_features = torch.from_numpy(
-                    self.eval_samples['mfcc_features'][rand_keys]).to(self.device)
+                    self.eval_samples['mfcc_features'][rand_keys]).float().to(self.device)
                 batch_vid_indices = torch.from_numpy(self.eval_samples['vid_indices'][rand_keys]).to(self.device)
 
             yield batch_extended_word_seq, batch_vec_seq, batch_audio, batch_mfcc_features, batch_vid_indices

@@ -983,7 +983,7 @@ class Processor(object):
                                            vec_seq, vid_indices, train=False,
                                            target_seq=target_seq, words=words, aux_info=aux_info,
                                            save_path=self.args.video_save_path,
-                                           make_video=True, calculate_metrics=False,
+                                           make_video=False, calculate_metrics=False,
                                            losses_all=losses_all, joint_mae=joint_mae, accel=accel)
                 end_idx = min(samples_to_generate, sample_idx + batch_size)
 

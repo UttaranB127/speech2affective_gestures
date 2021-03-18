@@ -52,7 +52,7 @@ parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
 parser.add_argument('--s2eg-load-last-best', type=bool, default=True, metavar='S2EG-LB',
                     help='load the most recent best model for s2eg (default: True)')
-parser.add_argument('--batch-size', type=int, default=512, metavar='B',
+parser.add_argument('--batch-size', type=int, default=128, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')

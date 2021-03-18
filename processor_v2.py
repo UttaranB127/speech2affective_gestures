@@ -355,7 +355,7 @@ class Processor(object):
         indexes.append(lang.EOS_token)
         return torch.Tensor(indexes).long()
 
-    def yield_batch(self, train):
+    def yield_batch_old(self, train):
         batch_word_seq_tensor = torch.zeros((self.args.batch_size, self.time_steps)).long().to(self.device)
         batch_word_seq_lengths = torch.zeros(self.args.batch_size).long().to(self.device)
         batch_extended_word_seq = torch.zeros((self.args.batch_size, self.time_steps)).long().to(self.device)
@@ -499,6 +499,42 @@ class Processor(object):
             #         threads[i].join()
             yield batch_word_seq_tensor, batch_word_seq_lengths, batch_extended_word_seq, batch_pose_seq, \
                 batch_vec_seq, batch_audio, batch_spectrogram, batch_mfcc, batch_vid_indices
+
+    def yield_batch(self, train):
+        if train:
+            data_s2eg = self.data_loader['train_data_s2eg']
+            num_data = self.num_train_samples
+        else:
+            data_s2eg = self.data_loader['eval_data_s2eg']
+            num_data = self.num_eval_samples
+
+        pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
+        prob_dist = np.ones(num_data) / float(num_data)
+
+        for p in range(pseudo_passes):
+            rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
+            if train:
+                batch_extended_word_seq = torch.from_numpy(
+                    self.train_samples['extended_word_seq'][rand_keys]).to(self.device)
+                batch_vec_seq = torch.from_numpy(self.train_samples['vec_seq'][rand_keys]).to(self.device)
+                batch_audio = torch.from_numpy(
+                    self.train_samples['audio'][rand_keys] *
+                    self.train_samples['audio_max'][rand_keys, None] / 32767).to(self.device)
+                batch_mfcc_features = torch.from_numpy(
+                    self.train_samples['mfcc_features'][rand_keys]).to(self.device)
+                batch_vid_indices = torch.from_numpy(self.train_samples['vid_indices'][rand_keys]).to(self.device)
+            else:
+                batch_extended_word_seq = torch.from_numpy(
+                    self.eval_samples['extended_word_seq'][rand_keys]).to(self.device)
+                batch_vec_seq = torch.from_numpy(self.eval_samples['vec_seq'][rand_keys]).to(self.device)
+                batch_audio = torch.from_numpy(
+                    self.eval_samples['audio'][rand_keys] *
+                    self.eval_samples['audio_max'][rand_keys, None] / 32767).to(self.device)
+                batch_mfcc_features = torch.from_numpy(
+                    self.eval_samples['mfcc_features'][rand_keys]).to(self.device)
+                batch_vid_indices = torch.from_numpy(self.eval_samples['vid_indices'][rand_keys]).to(self.device)
+
+            yield batch_extended_word_seq, batch_vec_seq, batch_audio, batch_mfcc_features, batch_vid_indices
 
     def return_batch(self, batch_size, randomized=True):
 
@@ -798,8 +834,9 @@ class Processor(object):
 
         start_time = time.time()
         self.meta_info['iter'] = 0
-        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
-            vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=True):
+
+        for extended_word_seq, vec_seq, audio,\
+                mfcc_features, vid_indices in self.yield_batch(train=True):
             loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                                    vec_seq, vid_indices, train=True)
             # Compute statistics
@@ -831,8 +868,8 @@ class Processor(object):
 
         start_time = time.time()
         self.meta_info['iter'] = 0
-        for word_seq_tensor, word_seq_lengths, extended_word_seq, pose_seq, \
-            vec_seq, audio, spectrogram, mfcc_features, vid_indices in self.yield_batch(train=False):
+        for extended_word_seq, vec_seq, audio,\
+                mfcc_features, vid_indices in self.yield_batch(train=False):
             with torch.no_grad():
                 loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
                                                        vec_seq, vid_indices, train=False)

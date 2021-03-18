@@ -161,22 +161,22 @@ class Processor(object):
             print('Training s2eg with batch size:\t{:>6}'.format(self.args.batch_size))
             train_file_name = jn(npz_path, 'train.npz')
             if not os.path.exists(train_file_name):
-                self.cache_data('train', train_file_name)
-            self.train_samples = np.load(train_file_name, allow_pickle=True)
+                self.save_cache('train', train_file_name)
+            self.load_cache('train', train_file_name)
         else:
             self.train_samples = None
         print('Total s2eg evaluation data:\t\t{:>6} ({:.2f}%)'.format(
             self.num_eval_samples, 100. * self.num_eval_samples / self.num_total_samples))
         eval_file_name = jn(npz_path, 'eval.npz')
         if not os.path.exists(eval_file_name):
-            self.cache_data('eval', eval_file_name)
-        self.eval_samples = np.load(eval_file_name, allow_pickle=True)
+            self.save_cache('eval', eval_file_name)
+        self.load_cache('eval', eval_file_name)
 
         print('Total s2eg testing data:\t\t{:>6} ({:.2f}%)'.format(
             self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))
         test_file_name = jn(npz_path, 'test.npz')
         if not os.path.exists(test_file_name):
-            self.cache_data('test', test_file_name)
+            self.save_cache('test', test_file_name)
 
         self.lr_s2eg_gen = self.s2eg_config_args.learning_rate
         self.lr_s2eg_dis = self.s2eg_config_args.learning_rate * self.s2eg_config_args.discriminator_lr_weight
@@ -189,7 +189,26 @@ class Processor(object):
             lr=self.lr_s2eg_dis,
             betas=(0.5, 0.999))
 
-    def cache_data(self, part, file_name):
+    def load_cache(self, part, file_name):
+        start_time = time.time()
+        print('Loading {} cache'.format(part), end='')
+        npz = np.load(file_name, allow_pickle=True)
+        samples_dict = {'extended_word_seq': npz['extended_word_seq'],
+                        'vec_seq': npz['vec_seq'],
+                        'audio': npz['audio'],
+                        'audio_max': npz['audio_max'],
+                        'mfcc_features': npz['mfcc_features'],
+                        'vid_indices': npz['vid_indices']
+                        }
+        if part == 'train':
+            self.train_samples = samples_dict
+        elif part == 'eval':
+            self.eval_samples = samples_dict
+        elif part == 'test':
+            self.test_samples = samples_dict
+        print(' took {:>6} seconds.'.format(int(np.ceil(time.time() - start_time))))
+
+    def save_cache(self, part, file_name):
         data_s2eg = self.data_loader['{}_data_s2eg'.format(part)]
         num_samples = self.num_train_samples if part == 'train' else\
             (self.num_eval_samples if part == 'eval' else self.num_test_samples)
@@ -516,12 +535,12 @@ class Processor(object):
             if train:
                 batch_extended_word_seq = torch.from_numpy(
                     self.train_samples['extended_word_seq'][rand_keys]).to(self.device)
-                batch_vec_seq = torch.from_numpy(self.train_samples['vec_seq'][rand_keys]).to(self.device)
+                batch_vec_seq = torch.from_numpy(self.train_samples['vec_seq'][rand_keys]).float().to(self.device)
                 batch_audio = torch.from_numpy(
                     self.train_samples['audio'][rand_keys] *
-                    self.train_samples['audio_max'][rand_keys, None] / 32767).to(self.device)
+                    self.train_samples['audio_max'][rand_keys, None] / 32767).float().to(self.device)
                 batch_mfcc_features = torch.from_numpy(
-                    self.train_samples['mfcc_features'][rand_keys]).to(self.device)
+                    self.train_samples['mfcc_features'][rand_keys]).float().to(self.device)
                 batch_vid_indices = torch.from_numpy(self.train_samples['vid_indices'][rand_keys]).to(self.device)
             else:
                 batch_extended_word_seq = torch.from_numpy(

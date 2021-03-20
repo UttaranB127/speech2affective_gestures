@@ -22,7 +22,7 @@ import utils.common as cmn
 from net.embedding_space_evaluator import EmbeddingSpaceEvaluator
 from net.ser_att_conv_rnn_v1 import AttConvRNN
 from net.multimodal_context_net_v2 import PoseGeneratorTriModal as PGT, ConvDiscriminatorTriModal as CDT
-from net.multimodal_context_net_v2 import PoseGenerator, AffDiscriminator
+from net.multimodal_context_net_v2_abl_audio import PoseGenerator, AffDiscriminator
 from utils.average_meter import AverageMeter
 from utils.data_preprocessor import DataPreprocessor
 from utils.gen_utils import create_video_and_save
@@ -130,9 +130,6 @@ class Processor(object):
                                             n_words=self.lang_model.n_words,
                                             word_embed_size=self.s2eg_config_args.wordembed_dim,
                                             word_embeddings=self.lang_model.word_embedding_weights,
-                                            num_mfcc=self.s2eg_config_args.num_mfcc,
-                                            mfcc_length=self.mfcc_length,
-                                            time_steps=self.time_steps,
                                             z_obj=self.train_speaker_model)
         self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
         self.evaluator_trimodal = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,

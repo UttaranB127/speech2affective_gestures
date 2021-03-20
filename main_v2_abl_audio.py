@@ -44,7 +44,7 @@ parser.add_argument('-dap', '--dataset-s2eg-already-processed',
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
-parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
+parser.add_argument('--train-s2eg', type=bool, default=True, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')
 parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')

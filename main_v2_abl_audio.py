@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 base_path = os.path.dirname(os.path.realpath(__file__))
 data_path = j(base_path, '../../data')
 
-models_s2eg_path = j(base_path, 'models', 's2eg_v2')
+models_s2eg_path = j(base_path, 'models', 's2eg_v2_abl_audio')
 
 
 def str2bool(v):

@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 import loader_v2 as loader
-import processor_v2_abl_audio as processor
+import processor_v2_abl_disc as processor
 
 from os.path import join as j
 
@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 base_path = os.path.dirname(os.path.realpath(__file__))
 data_path = j(base_path, '../../data')
 
-models_s2eg_path = j(base_path, 'models', 's2eg_v2_abl_audio')
+models_s2eg_path = j(base_path, 'models', 's2eg_v2_abl_disc')
 
 
 def str2bool(v):

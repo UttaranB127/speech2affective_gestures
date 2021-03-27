@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 base_path = os.path.dirname(os.path.realpath(__file__))
 data_path = j(base_path, '../../data')
 
-models_s2eg_path = j(base_path, 'models', 's2eg_v2')
+models_s2eg_path = j(base_path, 'models', 's2eg_v2_mfcc')
 
 
 def str2bool(v):
@@ -126,8 +126,8 @@ pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, 
 if args.train_s2eg:
     pr.train()
 
-pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
-                     randomized=randomized, ser_epoch='best', s2eg_epoch=227)
+# pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
+#                      randomized=randomized, ser_epoch='best', s2eg_epoch=227)
 
-# pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
-#                                  randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
+                                 randomized=randomized, s2eg_epoch=227)

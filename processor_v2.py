@@ -14,6 +14,7 @@ import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 
+from librosa.feature import mfcc
 from os.path import join as jn
 from torchlight.torchlight.io import IO
 
@@ -108,6 +109,7 @@ class Processor(object):
         self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
         self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
         self.mfcc_length = int(np.ceil(self.audio_length / 512))
+        self.num_mfcc = self.data_loader['train_data_s2eg'].num_mfcc
 
         self.best_s2eg_loss = np.inf
         self.best_s2eg_loss_epoch = None
@@ -1039,15 +1041,14 @@ class Processor(object):
             loss_dict['feat_dist'] = feat_dist
         else:
             print('[VAL Ours] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg,
-                                                                           elapsed_time))
+                                                                                elapsed_time))
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 
     def generate_gestures_by_env_file(self, env_file, clip_duration_range=None,
-                                      audio_fr=44100, fft_filter_num=40, audio_block_size=300,
                                       audio_sr=16000, randomized=True, fade_out=False,
-                                      load_saved_model=True, ser_epoch='best', s2eg_epoch='best',
-                                      make_video=False, save_pkl=False):
+                                      load_saved_model=True, s2eg_epoch='best',
+                                      make_video=True, save_pkl=True):
 
         if clip_duration_range is None:
             clip_duration_range = [5, 12]
@@ -1061,7 +1062,6 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        batch_size = 2048
         mean_dir_vec = np.squeeze(np.array(self.s2eg_config_args.mean_dir_vec))
 
         losses_all_trimodal = AverageMeter('loss')
@@ -1127,13 +1127,15 @@ class Processor(object):
                 if seed_seq is not None:
                     pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                         torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
-                    pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for seed poses
+                    # indicating bit for seed poses
+                    pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
 
                 pre_seq = torch.zeros((1, n_frames, self.pose_dim + 1))
                 if seed_seq is not None:
                     pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
                         torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
-                    pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for seed poses
+                    # indicating bit for seed poses
+                    pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
 
                 # target seq
                 target_seq = torch.from_numpy(target_dir_vec[0:n_frames]).unsqueeze(0).float().to(self.device)
@@ -1143,7 +1145,7 @@ class Processor(object):
                 # divide into synthesize units and do synthesize
                 unit_time = self.s2eg_config_args.n_poses / self.s2eg_config_args.motion_resampling_framerate
                 stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) / \
-                              self.s2eg_config_args.motion_resampling_framerate
+                    self.s2eg_config_args.motion_resampling_framerate
                 if clip_length < unit_time:
                     num_subdivisions = 1
                 else:
@@ -1163,8 +1165,9 @@ class Processor(object):
 
                 print('Sample {} of {}'.format(sample_idx + 1, samples_to_generate))
                 print('Subdivisions\t|\tUnit Time\t|\tClip Length\t|\tStride Time\t|\tAudio Sample Length')
-                print('{}\t\t\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{}'.format(num_subdivisions, unit_time,
-                                                                                      clip_length, stride_time,
+                print('{}\t\t\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{}'.format(num_subdivisions,
+                                                                                      unit_time, clip_length,
+                                                                                      stride_time,
                                                                                       audio_sample_length))
 
                 out_dir_vec_trimodal = None
@@ -1184,7 +1187,8 @@ class Processor(object):
                         if sub_div_idx == num_subdivisions - 1:
                             end_padding_duration = audio_sample_length - len(in_audio_np)
                         in_audio_np = np.pad(in_audio_np, (0, audio_sample_length - len(in_audio_np)), 'constant')
-                    in_mfcc = xxx
+                    in_mfcc = torch.from_numpy(mfcc(in_audio_np, sr=16000, n_mfcc=self.num_mfcc) / 1000.).\
+                        unsqueeze(0).to(self.device).float()
                     in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
 
                     # prepare text input
@@ -1202,7 +1206,7 @@ class Processor(object):
                         idx = max(0, int(np.floor((word[1] - overall_start_time) / frame_duration)))
                         extended_word_indices[idx] = self.lang_model.get_word_index(word[0])
                         word_indices[w_i + 1] = self.lang_model.get_word_index(word[0])
-                    print('\b\b', end='. ')
+                    print('\b\b', end='.\n')
                     in_text_padded = torch.LongTensor(extended_word_indices).unsqueeze(0).to(self.device)
                     in_text = torch.LongTensor(word_indices).unsqueeze(0).to(self.device)
 
@@ -1231,11 +1235,17 @@ class Processor(object):
                                                                        in_text_padded, in_audio, vid_idx)
                     out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_mfcc, vid_idx)
 
-                    losses_all_trimodal, joint_mae_trimodal, accel_trimodal = \
-                        self.push_samples(target_seq, out_dir_vec_trimodal, in_text_padded, in_audio,
-                                          losses_all_trimodal, joint_mae_trimodal, accel_trimodal)
-                    losses_all, joint_mae, accel = self.push_samples(target_seq, out_dir_vec, in_text_padded, in_audio,
-                                                                     losses_all, joint_mae, accel)
+                    self.evaluator_trimodal, losses_all_trimodal, joint_mae_trimodal, accel_trimodal = \
+                        Processor.push_samples(self.evaluator_trimodal, target_seq, out_dir_vec_trimodal,
+                                               in_text, in_audio, losses_all_trimodal, joint_mae_trimodal,
+                                               accel_trimodal,
+                                               self.s2eg_config_args.mean_dir_vec, self.s2eg_config_args.n_poses,
+                                               self.s2eg_config_args.n_pre_poses)
+                    self.evaluator, losses_all, joint_mae, accel = \
+                        Processor.push_samples(self.evaluator, target_seq, out_dir_vec,
+                                               in_text, in_audio, losses_all, joint_mae, accel,
+                                               self.s2eg_config_args.mean_dir_vec, self.s2eg_config_args.n_poses,
+                                               self.s2eg_config_args.n_pre_poses)
 
                     out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
                     out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
@@ -1331,9 +1341,8 @@ class Processor(object):
                         out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
                         audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
                         delete_audio_file=False)
-                    print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.format(sample_idx + 1,
-                                                                                           samples_to_generate,
-                                                                                           time.time() - start_time))
+                    print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.
+                          format(sample_idx + 1, samples_to_generate, time.time() - start_time))
 
                 # save pkl
                 if save_pkl:
@@ -1364,15 +1373,29 @@ class Processor(object):
         # print metrics
         loss_dict = {'loss': losses_all.avg, 'joint_mae': joint_mae.avg}
         elapsed_time = time.time() - start_time
+        if self.evaluator_trimodal and self.evaluator_trimodal.get_no_of_samples() > 0:
+            frechet_dist_trimodal, feat_dist_trimodal = self.evaluator_trimodal.get_scores()
+            print('[VAL Trimodal] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+                  'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
+                                                                 joint_mae_trimodal.avg, accel_trimodal.avg,
+                                                                 frechet_dist_trimodal, feat_dist_trimodal,
+                                                                 elapsed_time))
+            loss_dict['frechet_trimodal'] = frechet_dist_trimodal
+            loss_dict['feat_dist_trimodal'] = feat_dist_trimodal
+        else:
+            print('[VAL Trimodal] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
+                                                                           joint_mae_trimodal.avg,
+                                                                           elapsed_time))
+
         if self.evaluator and self.evaluator.get_no_of_samples() > 0:
             frechet_dist, feat_dist = self.evaluator.get_scores()
-            print('[VAL] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+            print('[VAL Ours] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
                   'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg, accel.avg,
                                                                  frechet_dist, feat_dist, elapsed_time))
             loss_dict['frechet'] = frechet_dist
             loss_dict['feat_dist'] = feat_dist
         else:
-            print('[VAL] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg,
-                                                                           elapsed_time))
+            print('[VAL Ours] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg,
+                                                                                elapsed_time))
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - overall_start_time))

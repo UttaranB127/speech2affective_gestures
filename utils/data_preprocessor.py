@@ -201,7 +201,7 @@ class DataPreprocessor:
         return words
 
     @staticmethod
-    def unnormalize_data(normalized_data, data_mean, data_std, dimensions_to_ignore):
+    def un_normalize_data(normalized_data, data_mean, data_std, dimensions_to_ignore):
         """
         this method is from
         https://github.com/asheshjain399/RNNexp/blob/srnn/structural_rnn/CRFProblems/H3.6m/generateMotionData.py#L12

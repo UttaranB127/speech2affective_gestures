@@ -104,7 +104,7 @@ class PoseGenerator(nn.Module):
                           bidirectional=True, dropout=args.dropout_prob)
         self.out = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size//2),
-            nn.LeakyReLU(True),
+            nn.LeakyReLU(inplace=True),
             nn.Linear(self.hidden_size//2, pose_dim)
         )
 

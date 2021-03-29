@@ -7,7 +7,7 @@ import utils.ted_db_utils as ted_db
 
 from net.tcn import TemporalConvNet
 from net.utils.graph import Graph
-from net.utils.tgcn import STGraphConv
+from net.utils.tgcn import STGraphConv, STGraphConvTranspose
 from utils import vocab
 
 
@@ -174,15 +174,15 @@ class AffDecoder(nn.Module):
         self.coords = coords
         self.num_joints = num_joints
 
-        kernel_size1 = 3
-        padding1 = (kernel_size1 - 1) // 2
-        self.conv1 = nn.ConvTranspose1d(8, 16, kernel_size1, padding=padding1)
-        self.batch_norm1 = nn.BatchNorm1d(16)
-
-        kernel_size2 = 5
-        padding2 = (kernel_size2 - 1) // 2
-        self.conv2 = nn.ConvTranspose1d(16, 48, kernel_size2, padding=padding2)
-        self.batch_norm2 = nn.BatchNorm1d(48)
+        # kernel_size1 = 3
+        # padding1 = (kernel_size1 - 1) // 2
+        # self.conv1 = nn.ConvTranspose1d(8, 16, kernel_size1, padding=padding1)
+        # self.batch_norm1 = nn.BatchNorm1d(16)
+        #
+        # kernel_size2 = 5
+        # padding2 = (kernel_size2 - 1) // 2
+        # self.conv2 = nn.ConvTranspose1d(16, 48, kernel_size2, padding=padding2)
+        # self.batch_norm2 = nn.BatchNorm1d(48)
 
         self.num_body_parts = len(ted_db.body_parts_edge_idx)
         graph1 = Graph(len(ted_db.body_parts_edge_pairs) + 1,
@@ -205,28 +205,33 @@ class AffDecoder(nn.Module):
         temporal_kernel_size1 = 9
         kernel_size1 = (temporal_kernel_size1, spatial_kernel_size1)
         padding1 = ((kernel_size1[0] - 1) // 2, (kernel_size1[1] - 1) // 2)
-        self.st_gcn1 = STGraphConv(16, 48, self.A1.size(0), kernel_size1,
-                                   stride=(1, 1), padding=padding1)
+        self.st_gcn1 = STGraphConvTranspose(16, 48, self.A1.size(0), kernel_size1,
+                                            stride=(1, 1), padding=padding1)
 
         spatial_kernel_size2 = 5
         temporal_kernel_size2 = 9
         kernel_size2 = (temporal_kernel_size2, spatial_kernel_size2)
         padding2 = ((kernel_size2[0] - 1) // 2, (kernel_size2[1] - 1) // 2)
-        self.st_gcn2 = STGraphConv(16, self.coords, self.A2.size(0), kernel_size2,
-                                   stride=(1, 1), padding=padding2)
+        self.st_gcn2 = STGraphConvTranspose(16, self.coords, self.A2.size(0), kernel_size2,
+                                            stride=(1, 1), padding=padding2)
 
         self.activation = nn.LeakyReLU(inplace=True)
 
     def forward(self, pose_feats):
         n, t, f = pose_feats.shape
 
-        feat1_out = self.activation(self.batch_norm1(self.conv1(pose_feats.permute(0, 2, 1))))
-        feat2_out = self.activation(self.batch_norm2(self.conv2(feat1_out)))
-        feat3_in = feat2_out.permute(0, 2, 1).contiguous().view(n, t, 3, -1).permute(0, 3, 1, 2)
+        # feat1_out = self.activation(self.batch_norm1(self.conv1(pose_feats.permute(0, 2, 1))))
+        # feat2_out = self.activation(self.batch_norm2(self.conv2(feat1_out)))
+        # feat3_in = feat2_out.permute(0, 2, 1).contiguous().view(n, t, self.num_body_parts, -1).permute(0, 3, 1, 2)
 
-        feat3_out, _ = self.st_gcn1(feat3_in, self.A1)
-        feat4_out, _ = self.st_gcn2(feat3_out.permute(0, 2, 1, 3).contiguous().
-                                    view(n, t, -1, self.num_joints).permute(0, 2, 1, 3),
+        # feat3_in = pose_feats.contiguous().view(n, t, self.num_body_parts, -1).permute(0, 3, 1, 2)
+        # feat3_out, _ = self.st_gcn1(feat3_in, self.A1)
+        # feat4_out, _ = self.st_gcn2(feat3_out.permute(0, 2, 1, 3).contiguous().
+        #                             view(n, t, -1, self.num_joints).permute(0, 2, 1, 3),
+        #                             self.A2)
+
+        feat4_in = pose_feats.contiguous().view(n, t, self.num_joints, -1).permute(0, 3, 1, 2)
+        feat4_out, _ = self.st_gcn2(feat4_in,
                                     self.A2)
 
         return feat4_out.permute(0, 2, 3, 1).contiguous().view(n, t, -1)
@@ -322,10 +327,11 @@ class PoseGenerator(nn.Module):
         pre_feat_seq = self.aff_encoder(pre_seq[..., :-1])
         if self.input_context == 'both':
             in_data = torch.cat((pre_feat_seq, audio_feat_seq, text_feat_seq), dim=2)
+            # in_data = torch.cat((pre_seq, audio_feat_seq, text_feat_seq), dim=2)
         elif self.input_context == 'audio':
-            in_data = torch.cat((pre_seq, audio_feat_seq), dim=2)
+            in_data = torch.cat((pre_feat_seq, audio_feat_seq), dim=2)
         elif self.input_context == 'text':
-            in_data = torch.cat((pre_seq, text_feat_seq), dim=2)
+            in_data = torch.cat((pre_feat_seq, text_feat_seq), dim=2)
         elif self.input_context == 'none':
             in_data = pre_seq
         else:

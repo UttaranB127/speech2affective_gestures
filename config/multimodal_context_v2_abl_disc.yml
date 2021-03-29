@@ -21,14 +21,14 @@ mean_pose: [ 0.0000306,  0.0004946,  0.0008437,  0.0033759, -0.2051629, -0.01434
 
 n_layers: 4
 hidden_size: 300
-hidden_size_s2eg: 8
+hidden_size_s2eg: 144
 z_type: speaker  # speaker, random, none
 input_context: both  # both, audio, text, none
 
 # train params
 epochs: 100
 batch_size: 128
-learning_rate: 1e-3
+learning_rate: 5e-4
 loss_regression_weight: 500
 loss_gan_weight: 5.0
 loss_warmup: 0

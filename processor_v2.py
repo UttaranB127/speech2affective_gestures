@@ -109,7 +109,7 @@ class Processor(object):
         self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
         self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
         self.mfcc_length = int(np.ceil(self.audio_length / 512))
-        self.num_mfcc = self.data_loader['train_data_s2eg'].num_mfcc
+        self.num_mfcc = self.data_loader['train_data_s2eg'].num_mfcc_combined
 
         self.best_s2eg_loss = np.inf
         self.best_s2eg_loss_epoch = None
@@ -127,23 +127,16 @@ class Processor(object):
                                       word_embeddings=self.lang_model.word_embedding_weights,
                                       z_obj=self.train_speaker_model)
         self.trimodal_discriminator = CDT(self.pose_dim)
-        self.s2eg_generator = PGT(self.s2eg_config_args,
-                                  pose_dim=self.pose_dim,
-                                  n_words=self.lang_model.n_words,
-                                  word_embed_size=self.s2eg_config_args.wordembed_dim,
-                                  word_embeddings=self.lang_model.word_embedding_weights,
-                                  z_obj=self.train_speaker_model)
-        self.s2eg_discriminator = CDT(self.pose_dim)
-        # self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
-        #                                     pose_dim=self.pose_dim,
-        #                                     n_words=self.lang_model.n_words,
-        #                                     word_embed_size=self.s2eg_config_args.wordembed_dim,
-        #                                     word_embeddings=self.lang_model.word_embedding_weights,
-        #                                     num_mfcc=self.s2eg_config_args.num_mfcc,
-        #                                     mfcc_length=self.mfcc_length,
-        #                                     time_steps=self.time_steps,
-        #                                     z_obj=self.train_speaker_model)
-        # self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
+        self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
+                                            pose_dim=self.pose_dim,
+                                            n_words=self.lang_model.n_words,
+                                            word_embed_size=self.s2eg_config_args.wordembed_dim,
+                                            word_embeddings=self.lang_model.word_embedding_weights,
+                                            mfcc_length=self.mfcc_length,
+                                            num_mfcc=self.num_mfcc,
+                                            time_steps=self.time_steps,
+                                            z_obj=self.train_speaker_model)
+        self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
         self.evaluator_trimodal = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,
                                                           self.lang_model, self.device)
         self.evaluator = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,
@@ -209,7 +202,7 @@ class Processor(object):
                         'vec_seq': npz['vec_seq'],
                         'audio': npz['audio'],
                         'audio_max': npz['audio_max'],
-                        'mfcc_features': npz['mfcc_features'],
+                        'mfcc_features': npz['mfcc_features'].astype(np.float16),
                         'vid_indices': npz['vid_indices']
                         }
         if part == 'train':
@@ -396,7 +389,7 @@ class Processor(object):
         batch_audio = torch.zeros((self.args.batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((self.args.batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
-        batch_mfcc = torch.zeros((self.args.batch_size, self.s2eg_config_args.num_mfcc,
+        batch_mfcc = torch.zeros((self.args.batch_size, self.num_mfcc,
                                   self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
 
@@ -594,7 +587,7 @@ class Processor(object):
         batch_audio = torch.zeros((batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
-        batch_mfcc = torch.zeros((batch_size, self.s2eg_config_args.num_mfcc,
+        batch_mfcc = torch.zeros((batch_size, self.num_mfcc,
                                   self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 
@@ -871,10 +864,12 @@ class Processor(object):
         if self.meta_info['epoch'] > warm_up_epochs and self.s2eg_config_args.loss_gan_weight > 0.0:
             loss_dict['gen'] = self.s2eg_config_args.loss_gan_weight * gen_error.item()
             loss_dict['dis'] = dis_error.item()
-        loss_dict['total_loss'] = 0.
-        for loss in loss_dict.keys():
-            loss_dict['total_loss'] += loss_dict[loss]
-        return loss_dict, losses_all_trimodal, joint_mae_trimodal, accel_trimodal, losses_all, joint_mae, accel
+        # total_loss = 0.
+        # for loss in loss_dict.keys():
+        #     total_loss += loss_dict[loss]
+        # return loss_dict, losses_all_trimodal, joint_mae_trimodal, accel_trimodal, losses_all, joint_mae, accel
+        return F.l1_loss(out_dir_vec, target_poses).item() - F.l1_loss(out_dir_vec_trimodal, target_poses).item(),\
+            losses_all_trimodal, joint_mae_trimodal, accel_trimodal, losses_all, joint_mae, accel
 
     def per_train_epoch(self):
 

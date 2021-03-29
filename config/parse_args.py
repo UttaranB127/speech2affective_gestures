@@ -21,7 +21,7 @@ def parse_args():
     parser.add("--val_data_path", action="append")
     parser.add("--test_data_path", action="append")
     parser.add("--model_save_path", required=True)
-    parser.add("--num_mfcc", type=int, default=13)
+    parser.add("--num_mfcc", type=int, default=14)
     parser.add("--pose_representation", type=str, default='3d_vec')
     parser.add("--mean_dir_vec", action="append", type=float, nargs='*')
     parser.add("--mean_pose", action="append", type=float, nargs='*')
@@ -40,6 +40,7 @@ def parse_args():
     parser.add("--dropout_prob", type=float, default=0.3)
     parser.add("--n_layers", type=int, default=2)
     parser.add("--hidden_size", type=int, default=200)
+    parser.add("--hidden_size_s2eg", type=int, default=8)
     parser.add("--z_type", type=str, default='none')
     parser.add("--input_context", type=str, default='both')
 

@@ -25,6 +25,7 @@ class DataPreprocessor:
         self.mean_pose = mean_pose
         self.mean_dir_vec = mean_dir_vec
         self.num_mfcc = num_mfcc
+        self.num_mfcc_combined = num_mfcc * 3 - 5
         self.disable_filtering = disable_filtering
 
         self.src_lmdb_env = lmdb.open(clip_lmdb_dir, readonly=True, lock=False)
@@ -137,6 +138,12 @@ class DataPreprocessor:
 
             # mfcc features
             sample_mfcc = mfcc(sample_audio, sr=16000, n_mfcc=self.num_mfcc) / 1000.
+            # mfcc 1st differential
+            sample_mfcc_1d = sample_mfcc[2:] - sample_mfcc[1:-1]
+            # mfcc 2nd differential
+            sample_mfcc_2d = sample_mfcc_1d[1:] - sample_mfcc_1d[:-1]
+            # combine all
+            sample_mfcc_combined = np.concatenate((sample_mfcc, sample_mfcc_1d, sample_mfcc_2d), axis=0)
 
             if len(sample_words) >= 2:
                 # filtering motion skeleton data
@@ -154,7 +161,7 @@ class DataPreprocessor:
                     sample_words_list.append(sample_words)
                     sample_audio_list.append(sample_audio)
                     sample_spectrogram_list.append(sample_spectrogram)
-                    sample_mfcc_list.append(sample_mfcc)
+                    sample_mfcc_list.append(sample_mfcc_combined)
                     aux_info.append(motion_info)
                 else:
                     n_filtered_out[filtering_message] += 1

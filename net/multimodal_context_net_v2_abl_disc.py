@@ -34,7 +34,7 @@ class WavEncoder(nn.Module):
 
 
 class MFCCEncoder(nn.Module):
-    def __init__(self, mfcc_length, time_steps):
+    def __init__(self, mfcc_length, num_mfcc, time_steps):
         super().__init__()
         self.conv1 = nn.Conv1d(mfcc_length, 64, 5, padding=2)
         self.batch_norm1 = nn.BatchNorm1d(64)
@@ -43,6 +43,9 @@ class MFCCEncoder(nn.Module):
         self.conv3 = nn.Conv1d(64, 48, 3, padding=1)
         self.batch_norm3 = nn.BatchNorm1d(48)
         self.conv4 = nn.Conv1d(48, time_steps, 3, padding=1)
+        self.batch_norm4 = nn.BatchNorm1d(time_steps)
+
+        self.linear1 = nn.Linear(num_mfcc, 32)
 
         self.activation = nn.LeakyReLU(0.3, inplace=True)
 
@@ -50,7 +53,8 @@ class MFCCEncoder(nn.Module):
         x_01 = self.activation(self.batch_norm1(self.conv1(mfcc_data.permute(0, 2, 1))))
         x_02 = self.activation(self.batch_norm2(self.conv2(x_01)))
         x_03 = self.activation(self.batch_norm3(self.conv3(x_02)))
-        out = self.activation(self.conv4(x_03))
+        x_04 = self.activation(self.batch_norm4(self.conv4(x_03)))
+        out = self.activation(self.linear1(x_04))
         return out
 
 
@@ -230,13 +234,13 @@ class AffDecoder(nn.Module):
 
 class PoseGenerator(nn.Module):
     def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings,
-                 num_mfcc, mfcc_length, time_steps, z_obj=None):
+                 mfcc_length, num_mfcc, time_steps, z_obj=None):
         super().__init__()
         self.pre_length = args.n_pre_poses
         self.gen_length = args.n_poses - args.n_pre_poses
         self.z_obj = z_obj
         self.input_context = args.input_context
-        self.mfcc_feature_length = num_mfcc
+        self.mfcc_feature_length = 32
         self.text_feature_length = 32
         self.pose_feature_length = 8
 
@@ -250,7 +254,7 @@ class PoseGenerator(nn.Module):
         elif self.input_context == 'none':
             self.in_size = self.pose_feature_length
 
-        self.audio_encoder = MFCCEncoder(mfcc_length, time_steps)
+        self.audio_encoder = MFCCEncoder(mfcc_length, num_mfcc, time_steps)
         self.text_encoder = TextEncoderTCN(args, n_words, word_embed_size, pre_trained_embedding=word_embeddings,
                                            dropout=args.dropout_prob)
         self.aff_encoder = AffEncoder()
@@ -269,7 +273,7 @@ class PoseGenerator(nn.Module):
             else:
                 pass  # random noise
 
-        self.hidden_size = args.hidden_size
+        self.hidden_size = args.hidden_size_s2eg
         self.gru = nn.GRU(self.in_size, hidden_size=self.hidden_size, num_layers=args.n_layers, batch_first=True,
                           bidirectional=True, dropout=args.dropout_prob)
         self.aff_decoder = AffDecoder()

@@ -446,6 +446,7 @@ class TedDBParams:
         self.expected_audio_length = int(round(n_poses / pose_resampling_fps * 16000))
         self.expected_spectrogram_length = calc_spectrogram_length_from_motion_length(n_poses, pose_resampling_fps)
         self.num_mfcc = num_mfcc
+        self.num_mfcc_combined = num_mfcc * 3 - 5
         self.mfcc_length = int(np.ceil(self.expected_audio_length) / 512)
 
         self.lang_model = None

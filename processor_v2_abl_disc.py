@@ -108,6 +108,7 @@ class Processor(object):
         self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
         self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
         self.mfcc_length = int(np.ceil(self.audio_length / 512))
+        self.num_mfcc_combined = self.data_loader['train_data_s2eg'].num_mfcc_combined
 
         self.best_s2eg_loss = np.inf
         self.best_s2eg_loss_epoch = None
@@ -130,8 +131,8 @@ class Processor(object):
                                             n_words=self.lang_model.n_words,
                                             word_embed_size=self.s2eg_config_args.wordembed_dim,
                                             word_embeddings=self.lang_model.word_embedding_weights,
-                                            num_mfcc=self.s2eg_config_args.num_mfcc,
                                             mfcc_length=self.mfcc_length,
+                                            num_mfcc=self.num_mfcc_combined,
                                             time_steps=self.time_steps,
                                             z_obj=self.train_speaker_model)
         self.s2eg_discriminator = ConvDiscriminator(self.pose_dim)
@@ -200,7 +201,7 @@ class Processor(object):
                         'vec_seq': npz['vec_seq'],
                         'audio': npz['audio'],
                         'audio_max': npz['audio_max'],
-                        'mfcc_features': npz['mfcc_features'],
+                        'mfcc_features': npz['mfcc_features'].astype(np.float16),
                         'vid_indices': npz['vid_indices']
                         }
         if part == 'train':
@@ -220,8 +221,7 @@ class Processor(object):
         vec_seq_all = np.zeros((num_samples, self.time_steps, self.pose_dim))
         audio_all = np.zeros((num_samples, self.audio_length), dtype=np.int16)
         audio_max_all = np.zeros(num_samples)
-        mfcc_features_all = np.zeros((num_samples, self.data_loader['train_data_s2eg'].num_mfcc,
-                                      self.mfcc_length))
+        mfcc_features_all = np.zeros((num_samples, self.num_mfcc_combined, self.mfcc_length))
         vid_indices_all = np.zeros(num_samples, dtype=np.int64)
         print('Caching {} data {:>6}/{}.'.format(part, 0, num_samples), end='')
         for k in range(num_samples):
@@ -388,7 +388,7 @@ class Processor(object):
         batch_audio = torch.zeros((self.args.batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((self.args.batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
-        batch_mfcc = torch.zeros((self.args.batch_size, self.s2eg_config_args.num_mfcc,
+        batch_mfcc = torch.zeros((self.args.batch_size, self.num_mfcc_combined,
                                   self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
 
@@ -586,7 +586,7 @@ class Processor(object):
         batch_audio = torch.zeros((batch_size, self.audio_length)).float().to(self.device)
         batch_spectrogram = torch.zeros((batch_size, 128,
                                          self.spectrogram_length)).float().to(self.device)
-        batch_mfcc = torch.zeros((batch_size, self.s2eg_config_args.num_mfcc,
+        batch_mfcc = torch.zeros((batch_size, self.num_mfcc_combined,
                                   self.mfcc_length)).float().to(self.device)
         batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 

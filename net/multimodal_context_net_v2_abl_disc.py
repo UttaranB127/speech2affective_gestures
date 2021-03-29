@@ -145,7 +145,7 @@ class AffEncoder(nn.Module):
         self.conv2 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
         self.batch_norm2 = nn.BatchNorm1d(8)
 
-        self.activation = nn.ReLU(inplace=True)
+        self.activation = nn.LeakyReLU(inplace=True)
 
     def forward(self, poses):
         n, t, jc = poses.shape
@@ -215,7 +215,7 @@ class AffDecoder(nn.Module):
         self.st_gcn2 = STGraphConv(16, self.coords, self.A2.size(0), kernel_size2,
                                    stride=(1, 1), padding=padding2)
 
-        self.activation = nn.ReLU(inplace=True)
+        self.activation = nn.LeakyReLU(inplace=True)
 
     def forward(self, pose_feats):
         n, t, f = pose_feats.shape

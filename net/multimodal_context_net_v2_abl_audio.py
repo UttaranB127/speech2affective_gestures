@@ -66,6 +66,82 @@ class TextEncoderTCN(nn.Module):
         return y.contiguous(), 0
 
 
+class AffEncoder(nn.Module):
+    def __init__(self, coords=3):
+        super().__init__()
+        self.coords = coords
+
+        graph1 = Graph(len(ted_db.dir_edge_pairs) + 1,
+                       ted_db.dir_edge_pairs,
+                       strategy='spatial',
+                       max_hop=2)
+        self.A1 = torch.tensor(graph1.A,
+                               dtype=torch.float32,
+                               requires_grad=False).cuda()
+        self.num_body_parts = len(ted_db.body_parts_edge_idx)
+        graph2 = Graph(len(ted_db.body_parts_edge_pairs) + 1,
+                       ted_db.body_parts_edge_pairs,
+                       strategy='spatial',
+                       max_hop=2)
+        self.A2 = torch.tensor(graph2.A,
+                               dtype=torch.float32,
+                               requires_grad=False).cuda()
+        spatial_kernel_size1 = 5
+        temporal_kernel_size1 = 9
+        kernel_size1 = (temporal_kernel_size1, spatial_kernel_size1)
+        padding1 = ((kernel_size1[0] - 1) // 2, (kernel_size1[1] - 1) // 2)
+
+        self.st_gcn1 = STGraphConv(coords, 16, self.A1.size(0), kernel_size1,
+                                   stride=(1, 1), padding=padding1)
+
+        spatial_kernel_size2 = 3
+        temporal_kernel_size2 = 9
+        kernel_size2 = (temporal_kernel_size2, spatial_kernel_size2)
+        padding2 = ((kernel_size2[0] - 1) // 2, (kernel_size2[1] - 1) // 2)
+        self.st_gcn2 = STGraphConv(48, 16, self.A2.size(0), kernel_size2,
+                                   stride=(1, 1), padding=padding2)
+        # self.pre_conv = nn.Sequential(
+        #     nn.Conv1d(input_size, 16, 3),
+        #     nn.BatchNorm1d(16),
+        #     nn.LeakyReLU(True),
+        #     nn.Conv1d(16, 8, 3),
+        #     nn.BatchNorm1d(8),
+        #     nn.LeakyReLU(True),
+        #     nn.Conv1d(8, 8, 3),
+        # )
+        kernel_size3 = 5
+        padding3 = (kernel_size3 - 1) // 2
+        self.conv1 = nn.Conv1d(48, 16, kernel_size3, padding=padding3)
+        self.batch_norm1 = nn.BatchNorm1d(16)
+
+        kernel_size4 = 3
+        padding4 = (kernel_size4 - 1) // 2
+        self.conv2 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
+        self.batch_norm2 = nn.BatchNorm1d(8)
+
+        self.activation = nn.LeakyReLU(inplace=True)
+
+    def forward(self, poses):
+        n, t, jc = poses.shape
+        j = jc // self.coords
+        # poses = torch.cat((poses, torch.zeros_like(poses[..., 0:3])), dim=-1)
+        feat1_out, _ = self.st_gcn1(poses.view(n, t, -1, 3).permute(0, 3, 1, 2), self.A1)
+        f1 = feat1_out.shape[1]
+        feat2_in = torch.zeros((n, t,
+                                ted_db.max_body_part_edges * f1,
+                                self.num_body_parts)).float().cuda()
+        for idx, body_part_idx in enumerate(ted_db.body_parts_edge_idx):
+            feat2_in[..., :f1 * len(body_part_idx), idx] =\
+                feat1_out[..., body_part_idx].permute(0, 2, 1, 3).contiguous().view(n, t, -1)
+        feat2_in = feat2_in.permute(0, 2, 1, 3)
+        feat2_out, _ = self.st_gcn2(feat2_in, self.A2)
+        feat3_in = feat2_out.permute(0, 2, 1, 3).contiguous().view(n, t, -1).permute(0, 2, 1)
+        feat3_out = self.activation(self.batch_norm1(self.conv1(feat3_in)))
+        feat4_out = self.activation(self.batch_norm2(self.conv2(feat3_out))).permute(0, 2, 1)
+
+        return feat4_out
+
+
 class PoseGenerator(nn.Module):
     def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings, z_obj=None):
         super().__init__()
@@ -180,7 +256,7 @@ class AffDiscriminator(nn.Module):
         self.out = nn.Linear(self.hidden_size, 1)
         self.out2 = nn.Linear(34, 1)
 
-        self.activation = nn.ReLU(inplace=True)
+        self.activation = nn.LeakyReLU(inplace=True)
 
         self.do_flatten_parameters = False
         if torch.cuda.device_count() > 1:
@@ -202,79 +278,3 @@ class AffDiscriminator(nn.Module):
         output_linear2 = self.out2(output_linear1)
 
         return torch.sigmoid(output_linear2)
-
-
-class AffEncoder(nn.Module):
-    def __init__(self, coords=3):
-        super().__init__()
-        self.coords = coords
-
-        graph1 = Graph(len(ted_db.dir_edge_pairs) + 1,
-                       ted_db.dir_edge_pairs,
-                       strategy='spatial',
-                       max_hop=2)
-        self.A1 = torch.tensor(graph1.A,
-                               dtype=torch.float32,
-                               requires_grad=False).cuda()
-        self.num_body_parts = len(ted_db.body_parts_edge_idx)
-        graph2 = Graph(len(ted_db.body_parts_edge_pairs) + 1,
-                       ted_db.body_parts_edge_pairs,
-                       strategy='spatial',
-                       max_hop=2)
-        self.A2 = torch.tensor(graph2.A,
-                               dtype=torch.float32,
-                               requires_grad=False).cuda()
-        spatial_kernel_size1 = 5
-        temporal_kernel_size1 = 9
-        kernel_size1 = (temporal_kernel_size1, spatial_kernel_size1)
-        padding1 = ((kernel_size1[0] - 1) // 2, (kernel_size1[1] - 1) // 2)
-
-        self.st_gcn1 = STGraphConv(coords, 16, self.A1.size(0), kernel_size1,
-                                   stride=(1, 1), padding=padding1)
-
-        spatial_kernel_size2 = 3
-        temporal_kernel_size2 = 9
-        kernel_size2 = (temporal_kernel_size2, spatial_kernel_size2)
-        padding2 = ((kernel_size2[0] - 1) // 2, (kernel_size2[1] - 1) // 2)
-        self.st_gcn2 = STGraphConv(48, 16, self.A2.size(0), kernel_size2,
-                                   stride=(1, 1), padding=padding2)
-        # self.pre_conv = nn.Sequential(
-        #     nn.Conv1d(input_size, 16, 3),
-        #     nn.BatchNorm1d(16),
-        #     nn.LeakyReLU(True),
-        #     nn.Conv1d(16, 8, 3),
-        #     nn.BatchNorm1d(8),
-        #     nn.LeakyReLU(True),
-        #     nn.Conv1d(8, 8, 3),
-        # )
-        kernel_size3 = 5
-        padding3 = (kernel_size3 - 1) // 2
-        self.conv1 = nn.Conv1d(48, 16, kernel_size3, padding=padding3)
-        self.batch_norm1 = nn.BatchNorm1d(16)
-
-        kernel_size4 = 3
-        padding4 = (kernel_size4 - 1) // 2
-        self.conv2 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
-        self.batch_norm2 = nn.BatchNorm1d(8)
-
-        self.activation = nn.ReLU(inplace=True)
-
-    def forward(self, poses):
-        n, t, jc = poses.shape
-        j = jc // self.coords
-        # poses = torch.cat((poses, torch.zeros_like(poses[..., 0:3])), dim=-1)
-        feat1_out, _ = self.st_gcn1(poses.view(n, t, -1, 3).permute(0, 3, 1, 2), self.A1)
-        f1 = feat1_out.shape[1]
-        feat2_in = torch.zeros((n, t,
-                                ted_db.max_body_part_edges * f1,
-                                self.num_body_parts)).float().cuda()
-        for idx, body_part_idx in enumerate(ted_db.body_parts_edge_idx):
-            feat2_in[..., :f1 * len(body_part_idx), idx] =\
-                feat1_out[..., body_part_idx].permute(0, 2, 1, 3).contiguous().view(n, t, -1)
-        feat2_in = feat2_in.permute(0, 2, 1, 3)
-        feat2_out, _ = self.st_gcn2(feat2_in, self.A2)
-        feat3_in = feat2_out.permute(0, 2, 1, 3).contiguous().view(n, t, -1).permute(0, 2, 1)
-        feat3_out = self.activation(self.batch_norm1(self.conv1(feat3_in)))
-        feat4_out = self.activation(self.batch_norm2(self.conv2(feat3_out))).permute(0, 2, 1)
-
-        return feat4_out

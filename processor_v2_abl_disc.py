@@ -897,7 +897,7 @@ class Processor(object):
         self.show_epoch_info()
         self.io.print_timer()
 
-        self.adjust_lr_s2eg()
+        # self.adjust_lr_s2eg()
 
     def per_eval_epoch(self):
 

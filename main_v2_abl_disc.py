@@ -54,7 +54,7 @@ parser.add_argument('--batch-size', type=int, default=512, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--s2eg-start-epoch', type=int, default=120, metavar='S2EG-SE',
+parser.add_argument('--s2eg-start-epoch', type=int, default=0, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
 parser.add_argument('--s2eg-num-epoch', type=int, default=500, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')

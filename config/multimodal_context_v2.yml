@@ -12,7 +12,7 @@ model_save_path: ../output/train_multimodal_context
 random_seed: -1
 
 # data params
-num_mfcc: 13
+num_mfcc: 14
 
 # model params
 model: multimodal_context
@@ -20,17 +20,17 @@ mean_dir_vec: [ 0.0154009, -0.9690125, -0.0884354, -0.0022264, -0.8655276, 0.434
 mean_pose: [ 0.0000306,  0.0004946,  0.0008437,  0.0033759, -0.2051629, -0.0143453,  0.0031566, -0.3054764,  0.0411491,  0.0029072, -0.4254303, -0.001311 , -0.1458413, -0.1505532, -0.0138192, -0.2835603,  0.0670333,  0.0107002, -0.2280813,  0.112117 , 0.2087789,  0.1523502, -0.1521499, -0.0161503,  0.291909 , 0.0644232,  0.0040145,  0.2452035,  0.1115339,  0.2051307]
 
 n_layers: 4
-hidden_size: 300
+hidden_size: 8
 z_type: speaker  # speaker, random, none
 input_context: both  # both, audio, text, none
 
 # train params
 epochs: 100
 batch_size: 128
-learning_rate: 1e-4
+learning_rate: 5e-4
 loss_regression_weight: 500
 loss_gan_weight: 5.0
-loss_warmup: 10
+loss_warmup: 0
 loss_kld_weight: 0.1
 loss_reg_weight: 0.05
 

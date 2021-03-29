@@ -18,7 +18,8 @@ parser.add_argument('-speaker', '--speaker',
                     help='download videos of a specific speaker ')
 args = parser.parse_args()
 
-speakers = ['almaram', 'angelica', 'chemistry', 'conan', 'ellen', 'jon', 'oliver', 'rock,', 'seth', 'shelly']
+# speakers = ['almaram', 'angelica', 'chemistry', 'conan', 'ellen', 'jon', 'oliver', 'rock', 'seth', 'shelly']
+speakers = ['rock']
 BASE_PATH = args.base_path
 df = pd.read_csv(os.path.join(BASE_PATH, 'videos_links.csv'))
 

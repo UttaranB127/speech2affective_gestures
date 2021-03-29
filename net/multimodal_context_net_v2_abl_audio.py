@@ -172,6 +172,43 @@ class AffDiscriminator(nn.Module):
         self.coords = coords
         self.hidden_size = 64
 
+        self.aff_encoder = AffEncoder(coords=coords)
+
+        self.gru = nn.GRU(8, hidden_size=self.hidden_size,
+                          num_layers=4, bidirectional=True,
+                          dropout=0.3, batch_first=True)
+        self.out = nn.Linear(self.hidden_size, 1)
+        self.out2 = nn.Linear(34, 1)
+
+        self.activation = nn.ReLU(inplace=True)
+
+        self.do_flatten_parameters = False
+        if torch.cuda.device_count() > 1:
+            self.do_flatten_parameters = True
+
+    def forward(self, poses, in_text=None):
+        n, t, jc = poses.shape
+        decoder_hidden = None
+        if self.do_flatten_parameters:
+            self.gru.flatten_parameters()
+
+        aff_encoder_out = self.aff_encoder(poses)
+        output_gru, decoder_hidden = self.gru(aff_encoder_out, decoder_hidden)
+        # sum bidirectional outputs
+        output_gru_bi = output_gru[:, :, :self.hidden_size] + output_gru[:, :, self.hidden_size:]
+
+        # apply linear to every output
+        output_linear1 = self.out(output_gru_bi.contiguous().view(-1, output_gru_bi.shape[2])).view(n, -1)
+        output_linear2 = self.out2(output_linear1)
+
+        return torch.sigmoid(output_linear2)
+
+
+class AffEncoder(nn.Module):
+    def __init__(self, coords=3):
+        super().__init__()
+        self.coords = coords
+
         graph1 = Graph(len(ted_db.dir_edge_pairs) + 1,
                        ted_db.dir_edge_pairs,
                        strategy='spatial',
@@ -220,23 +257,9 @@ class AffDiscriminator(nn.Module):
         self.conv2 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
         self.batch_norm2 = nn.BatchNorm1d(8)
 
-        self.gru = nn.GRU(8, hidden_size=self.hidden_size,
-                          num_layers=4, bidirectional=True,
-                          dropout=0.3, batch_first=True)
-        self.out = nn.Linear(self.hidden_size, 1)
-        self.out2 = nn.Linear(34, 1)
-
         self.activation = nn.ReLU(inplace=True)
 
-        self.do_flatten_parameters = False
-        if torch.cuda.device_count() > 1:
-            self.do_flatten_parameters = True
-
-    def forward(self, poses, in_text=None):
-        decoder_hidden = None
-        if self.do_flatten_parameters:
-            self.gru.flatten_parameters()
-
+    def forward(self, poses):
         n, t, jc = poses.shape
         j = jc // self.coords
         # poses = torch.cat((poses, torch.zeros_like(poses[..., 0:3])), dim=-1)
@@ -254,12 +277,4 @@ class AffDiscriminator(nn.Module):
         feat3_out = self.activation(self.batch_norm1(self.conv1(feat3_in)))
         feat4_out = self.activation(self.batch_norm2(self.conv2(feat3_out))).permute(0, 2, 1)
 
-        output_gru, decoder_hidden = self.gru(feat4_out, decoder_hidden)
-        # sum bidirectional outputs
-        output_gru_bi = output_gru[:, :, :self.hidden_size] + output_gru[:, :, self.hidden_size:]
-
-        # apply linear to every output
-        output_linear1 = self.out(output_gru_bi.contiguous().view(-1, output_gru_bi.shape[2])).view(n, -1)
-        output_linear2 = self.out2(output_linear1)
-
-        return torch.sigmoid(output_linear2)
+        return feat4_out

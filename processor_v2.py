@@ -127,16 +127,23 @@ class Processor(object):
                                       word_embeddings=self.lang_model.word_embedding_weights,
                                       z_obj=self.train_speaker_model)
         self.trimodal_discriminator = CDT(self.pose_dim)
-        self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
-                                            pose_dim=self.pose_dim,
-                                            n_words=self.lang_model.n_words,
-                                            word_embed_size=self.s2eg_config_args.wordembed_dim,
-                                            word_embeddings=self.lang_model.word_embedding_weights,
-                                            num_mfcc=self.s2eg_config_args.num_mfcc,
-                                            mfcc_length=self.mfcc_length,
-                                            time_steps=self.time_steps,
-                                            z_obj=self.train_speaker_model)
-        self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
+        self.s2eg_generator = PGT(self.s2eg_config_args,
+                                  pose_dim=self.pose_dim,
+                                  n_words=self.lang_model.n_words,
+                                  word_embed_size=self.s2eg_config_args.wordembed_dim,
+                                  word_embeddings=self.lang_model.word_embedding_weights,
+                                  z_obj=self.train_speaker_model)
+        self.s2eg_discriminator = CDT(self.pose_dim)
+        # self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
+        #                                     pose_dim=self.pose_dim,
+        #                                     n_words=self.lang_model.n_words,
+        #                                     word_embed_size=self.s2eg_config_args.wordembed_dim,
+        #                                     word_embeddings=self.lang_model.word_embedding_weights,
+        #                                     num_mfcc=self.s2eg_config_args.num_mfcc,
+        #                                     mfcc_length=self.mfcc_length,
+        #                                     time_steps=self.time_steps,
+        #                                     z_obj=self.train_speaker_model)
+        # self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
         self.evaluator_trimodal = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,
                                                           self.lang_model, self.device)
         self.evaluator = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,
@@ -701,8 +708,10 @@ class Processor(object):
         use_noisy_target = False
 
         # make pre seq input
-        pre_seq = target_poses.new_zeros((target_poses.shape[0], target_poses.shape[1], target_poses.shape[2] + 1))
-        pre_seq[:, 0:self.s2eg_config_args.n_pre_poses, :-1] = target_poses[:, 0:self.s2eg_config_args.n_pre_poses]
+        pre_seq = target_poses.new_zeros((target_poses.shape[0], target_poses.shape[1],
+                                          target_poses.shape[2] + 1))
+        pre_seq[:, 0:self.s2eg_config_args.n_pre_poses, :-1] =\
+            target_poses[:, 0:self.s2eg_config_args.n_pre_poses]
         pre_seq[:, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
 
         ###########################################################################################
@@ -712,7 +721,8 @@ class Processor(object):
             self.s2eg_dis_optimizer.zero_grad()
 
             # out shape (batch x seq x dim)
-            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+            # out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)  # CHANGE!!!
 
             if use_noisy_target:
                 noise_target = Processor.add_noise(target_poses)
@@ -734,7 +744,8 @@ class Processor(object):
 
         # decoding
         out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq, in_text, in_audio, vid_indices)
-        out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+        # out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+        out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)  # CHANGE!!!
 
         # make a video
         assert not make_video or (make_video and target_seq is not None), \
@@ -817,7 +828,9 @@ class Processor(object):
             else:
                 rand_vids = None
 
-            out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_mfcc, rand_vids)
+            # out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_mfcc, rand_vids)
+            # CHANGE!!!
+            out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_audio, rand_vids)
             beta = 0.05
             pose_l1 = F.smooth_l1_loss(out_dir_vec / beta, out_dir_vec_rand_vid.detach() / beta,
                                        reduction='none') * beta
@@ -895,7 +908,7 @@ class Processor(object):
         self.show_epoch_info()
         self.io.print_timer()
 
-        self.adjust_lr_s2eg()
+        # self.adjust_lr_s2eg()
 
     def per_eval_epoch(self):
 
@@ -985,7 +998,7 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        batch_size = 1
+        batch_size = 2048
 
         losses_all_trimodal = AverageMeter('loss')
         joint_mae_trimodal = AverageMeter('mae_on_joint')

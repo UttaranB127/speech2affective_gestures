@@ -220,7 +220,8 @@ class Processor(object):
         vec_seq_all = np.zeros((num_samples, self.time_steps, self.pose_dim))
         audio_all = np.zeros((num_samples, self.audio_length), dtype=np.int16)
         audio_max_all = np.zeros(num_samples)
-        mfcc_features_all = np.zeros((num_samples, 13, self.mfcc_length))
+        mfcc_features_all = np.zeros((num_samples, self.data_loader['train_data_s2eg'].num_mfcc,
+                                      self.mfcc_length))
         vid_indices_all = np.zeros(num_samples, dtype=np.int64)
         print('Caching {} data {:>6}/{}.'.format(part, 0, num_samples), end='')
         for k in range(num_samples):
@@ -721,7 +722,8 @@ class Processor(object):
                 dis_real = self.s2eg_discriminator(target_poses, in_text)
                 dis_fake = self.s2eg_discriminator(out_dir_vec.detach(), in_text)
 
-            dis_error = torch.sum(-torch.mean(torch.log(dis_real + 1e-8) + torch.log(1 - dis_fake + 1e-8)))  # ns-gan
+            # ns-gan
+            dis_error = torch.sum(-torch.mean(torch.log(dis_real + 1e-8) + torch.log(1 - dis_fake + 1e-8)))
             if train:
                 dis_error.backward()
                 self.s2eg_dis_optimizer.step()
@@ -856,10 +858,12 @@ class Processor(object):
         if self.meta_info['epoch'] > warm_up_epochs and self.s2eg_config_args.loss_gan_weight > 0.0:
             loss_dict['gen'] = self.s2eg_config_args.loss_gan_weight * gen_error.item()
             loss_dict['dis'] = dis_error.item()
-        loss_dict['total_loss'] = 0.
-        for loss in loss_dict.keys():
-            loss_dict['total_loss'] += loss_dict[loss]
-        return loss_dict, losses_all_trimodal, joint_mae_trimodal, accel_trimodal, losses_all, joint_mae, accel
+        # total_loss = 0.
+        # for loss in loss_dict.keys():
+        #     total_loss += loss_dict[loss]
+        # return loss_dict, losses_all_trimodal, joint_mae_trimodal, accel_trimodal, losses_all, joint_mae, accel
+        return F.l1_loss(out_dir_vec, target_poses).item() - F.l1_loss(out_dir_vec_trimodal, target_poses).item(),\
+            losses_all_trimodal, joint_mae_trimodal, accel_trimodal, losses_all, joint_mae, accel
 
     def per_train_epoch(self):
 
@@ -873,12 +877,12 @@ class Processor(object):
 
         for extended_word_seq, vec_seq, audio,\
                 mfcc_features, vid_indices in self.yield_batch(train=True):
-            loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
-                                                   vec_seq, vid_indices, train=True)
+            loss, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
+                                              vec_seq, vid_indices, train=True)
             # Compute statistics
-            batch_s2eg_loss += loss_dict['total_loss']
+            batch_s2eg_loss += loss
 
-            self.iter_info['s2eg_loss'] = loss_dict['total_loss']
+            self.iter_info['s2eg_loss'] = loss
             self.iter_info['lr_gen'] = '{}'.format(self.lr_s2eg_gen)
             self.iter_info['lr_dis'] = '{}'.format(self.lr_s2eg_dis)
             self.show_iter_info()
@@ -907,12 +911,12 @@ class Processor(object):
         for extended_word_seq, vec_seq, audio,\
                 mfcc_features, vid_indices in self.yield_batch(train=False):
             with torch.no_grad():
-                loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
-                                                       vec_seq, vid_indices, train=False)
+                loss, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
+                                                  vec_seq, vid_indices, train=False)
                 # Compute statistics
-                batch_s2eg_loss += loss_dict['total_loss']
+                batch_s2eg_loss += loss
 
-                self.iter_info['s2eg_loss'] = loss_dict['total_loss']
+                self.iter_info['s2eg_loss'] = loss
                 self.iter_info['lr_gen'] = '{:.6f}'.format(self.lr_s2eg_gen)
                 self.iter_info['lr_dis'] = '{:.6f}'.format(self.lr_s2eg_dis)
                 self.show_iter_info()
@@ -935,6 +939,8 @@ class Processor(object):
         self.io.print_timer()
 
     def train(self):
+        trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
+        self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
         if self.args.s2eg_load_last_best:
             s2eg_model_found = self.load_model_at_epoch(epoch=self.args.s2eg_start_epoch)

@@ -163,6 +163,7 @@ class STGraphConv(nn.Module):
                  stride=(1, 1),
                  padding=(0, 0),
                  dropout=0,
+                 activation='LeakyRelU',
                  residual=True):
         super().__init__()
 
@@ -207,7 +208,10 @@ class STGraphConv(nn.Module):
                 nn.BatchNorm2d(out_channels),
             )
 
-        self.relu = nn.ReLU(inplace=True)
+        if activation.lower() == 'leakyrelu':
+            self.activation = nn.LeakyReLU(inplace=True)
+        elif activation.lower() == 'relu':
+            self.activation = nn.ReLU(inplace=True)
 
     def forward(self, x, A):
 
@@ -215,4 +219,4 @@ class STGraphConv(nn.Module):
         x, A = self.gcn(x, A)
         x = self.tcn(x) + res
 
-        return self.relu(x), A
+        return self.activation(x), A

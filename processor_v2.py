@@ -883,12 +883,12 @@ class Processor(object):
 
         for extended_word_seq, vec_seq, audio,\
                 mfcc_features, vid_indices in self.yield_batch(train=True):
-            loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
-                                                   vec_seq, vid_indices, train=True)
+            loss, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
+                                              vec_seq, vid_indices, train=True)
             # Compute statistics
-            batch_s2eg_loss += loss_dict['total_loss']
+            batch_s2eg_loss += loss
 
-            self.iter_info['s2eg_loss'] = loss_dict['total_loss']
+            self.iter_info['s2eg_loss'] = loss
             self.iter_info['lr_gen'] = '{}'.format(self.lr_s2eg_gen)
             self.iter_info['lr_dis'] = '{}'.format(self.lr_s2eg_dis)
             self.show_iter_info()
@@ -917,12 +917,12 @@ class Processor(object):
         for extended_word_seq, vec_seq, audio,\
                 mfcc_features, vid_indices in self.yield_batch(train=False):
             with torch.no_grad():
-                loss_dict, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
-                                                       vec_seq, vid_indices, train=False)
+                loss, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
+                                                  vec_seq, vid_indices, train=False)
                 # Compute statistics
-                batch_s2eg_loss += loss_dict['total_loss']
+                batch_s2eg_loss += loss
 
-                self.iter_info['s2eg_loss'] = loss_dict['total_loss']
+                self.iter_info['s2eg_loss'] = loss
                 self.iter_info['lr_gen'] = '{:.6f}'.format(self.lr_s2eg_gen)
                 self.iter_info['lr_dis'] = '{:.6f}'.format(self.lr_s2eg_dis)
                 self.show_iter_info()
@@ -945,6 +945,8 @@ class Processor(object):
         self.io.print_timer()
 
     def train(self):
+        trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
+        self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
         if self.args.s2eg_load_last_best:
             s2eg_model_found = self.load_model_at_epoch(epoch=self.args.s2eg_start_epoch)

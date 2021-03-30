@@ -438,7 +438,7 @@ class PoseGenerator(nn.Module):
         self.input_context = args.input_context
         self.mfcc_feature_length = 32
         self.text_feature_length = 32
-        self.pose_feature_length = pose_dim + 1
+        self.pose_feature_length = 8
 
         if self.input_context == 'both':
             # audio_feat + text_feat + last pose + constraint bit
@@ -448,12 +448,12 @@ class PoseGenerator(nn.Module):
         elif self.input_context == 'text':
             self.in_size = self.text_feature_length + self.pose_feature_length  # text only
         elif self.input_context == 'none':
-            self.in_size = pose_dim + 1
+            self.in_size = self.pose_feature_length
 
         self.audio_encoder = MFCCEncoder(mfcc_length, num_mfcc, time_steps)
         self.text_encoder = TextEncoderTCN(args, n_words, word_embed_size, pre_trained_embedding=word_embeddings,
                                            dropout=args.dropout_prob)
-        self.pose_encoder = AffEncoder()
+        self.aff_encoder = AffEncoder()
 
         self.speaker_embedding = None
         if self.z_obj:

@@ -127,15 +127,25 @@ class Processor(object):
                                       word_embeddings=self.lang_model.word_embedding_weights,
                                       z_obj=self.train_speaker_model)
         self.trimodal_discriminator = CDT(self.pose_dim)
-        self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
-                                            pose_dim=self.pose_dim,
-                                            n_words=self.lang_model.n_words,
-                                            word_embed_size=self.s2eg_config_args.wordembed_dim,
-                                            word_embeddings=self.lang_model.word_embedding_weights,
-                                            mfcc_length=self.mfcc_length,
-                                            num_mfcc=self.num_mfcc,
-                                            time_steps=self.time_steps,
-                                            z_obj=self.train_speaker_model)
+        self.use_mfcc = True
+        if self.use_mfcc:
+            self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
+                                                pose_dim=self.pose_dim,
+                                                n_words=self.lang_model.n_words,
+                                                word_embed_size=self.s2eg_config_args.wordembed_dim,
+                                                word_embeddings=self.lang_model.word_embedding_weights,
+                                                mfcc_length=self.mfcc_length,
+                                                num_mfcc=self.num_mfcc,
+                                                time_steps=self.time_steps,
+                                                z_obj=self.train_speaker_model)
+        else:
+            self.s2eg_generator = PGT(self.s2eg_config_args,
+                                      pose_dim=self.pose_dim,
+                                      n_words=self.lang_model.n_words,
+                                      word_embed_size=self.s2eg_config_args.wordembed_dim,
+                                      word_embeddings=self.lang_model.word_embedding_weights,
+                                      z_obj=self.train_speaker_model)
+        # self.s2eg_discriminator = CDT(self.pose_dim)
         self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
         self.evaluator_trimodal = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,
                                                           self.lang_model, self.device)
@@ -714,8 +724,10 @@ class Processor(object):
             self.s2eg_dis_optimizer.zero_grad()
 
             # out shape (batch x seq x dim)
-            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
-            # out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)  # CHANGE!!!
+            if self.use_mfcc:
+                out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+            else:
+                out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
 
             if use_noisy_target:
                 noise_target = Processor.add_noise(target_poses)
@@ -737,8 +749,10 @@ class Processor(object):
 
         # decoding
         out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq, in_text, in_audio, vid_indices)
-        out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
-        # out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)  # CHANGE!!!
+        if self.use_mfcc:
+            out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+        else:
+            out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
 
         # make a video
         assert not make_video or (make_video and target_seq is not None), \
@@ -821,9 +835,10 @@ class Processor(object):
             else:
                 rand_vids = None
 
-            out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_mfcc, rand_vids)
-            # CHANGE!!!
-            # out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_audio, rand_vids)
+            if self.use_mfcc:
+                out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_mfcc, rand_vids)
+            else:
+                out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_audio, rand_vids)
             beta = 0.05
             pose_l1 = F.smooth_l1_loss(out_dir_vec / beta, out_dir_vec_rand_vid.detach() / beta,
                                        reduction='none') * beta

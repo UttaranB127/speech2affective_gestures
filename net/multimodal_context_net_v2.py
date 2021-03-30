@@ -96,7 +96,8 @@ class AffEncoder(nn.Module):
         super().__init__()
         self.coords = coords
 
-        graph1 = Graph(len(ted_db.dir_edge_pairs) + 1,
+        self.num_dir_vec_pairs = len(ted_db.dir_vec_pairs)
+        graph1 = Graph(self.num_dir_vec_pairs,
                        ted_db.dir_edge_pairs,
                        strategy='spatial',
                        max_hop=2)
@@ -105,7 +106,7 @@ class AffEncoder(nn.Module):
                                requires_grad=False).cuda()
 
         self.num_body_parts = len(ted_db.body_parts_edge_idx)
-        graph2 = Graph(len(ted_db.body_parts_edge_pairs) + 1,
+        graph2 = Graph(self.num_body_parts,
                        ted_db.body_parts_edge_pairs,
                        strategy='spatial',
                        max_hop=2)
@@ -119,6 +120,7 @@ class AffEncoder(nn.Module):
         padding1 = ((kernel_size1[0] - 1) // 2, (kernel_size1[1] - 1) // 2)
         self.st_gcn1 = STGraphConv(coords, 16, self.A1.size(0), kernel_size1,
                                    stride=(1, 1), padding=padding1)
+        self.batch_norm1 = nn.BatchNorm1d(16 * self.num_dir_vec_pairs)
 
         spatial_kernel_size2 = 3
         temporal_kernel_size2 = 9
@@ -126,6 +128,7 @@ class AffEncoder(nn.Module):
         padding2 = ((kernel_size2[0] - 1) // 2, (kernel_size2[1] - 1) // 2)
         self.st_gcn2 = STGraphConv(48, 16, self.A2.size(0), kernel_size2,
                                    stride=(1, 1), padding=padding2)
+        self.batch_norm2 = nn.BatchNorm1d(16 * self.num_body_parts)
         # self.pre_conv = nn.Sequential(
         #     nn.Conv1d(input_size, 16, 3),
         #     nn.BatchNorm1d(16),
@@ -137,13 +140,13 @@ class AffEncoder(nn.Module):
         # )
         kernel_size3 = 5
         padding3 = (kernel_size3 - 1) // 2
-        self.conv1 = nn.Conv1d(48, 16, kernel_size3, padding=padding3)
-        self.batch_norm1 = nn.BatchNorm1d(16)
+        self.conv3 = nn.Conv1d(48, 16, kernel_size3, padding=padding3)
+        self.batch_norm3 = nn.BatchNorm1d(16)
 
         kernel_size4 = 3
         padding4 = (kernel_size4 - 1) // 2
-        self.conv2 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
-        self.batch_norm2 = nn.BatchNorm1d(8)
+        self.conv4 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
+        self.batch_norm4 = nn.BatchNorm1d(8)
 
         self.activation = nn.LeakyReLU(inplace=True)
 
@@ -153,17 +156,21 @@ class AffEncoder(nn.Module):
         # poses = torch.cat((poses, torch.zeros_like(poses[..., 0:3])), dim=-1)
         feat1_out, _ = self.st_gcn1(poses.view(n, t, -1, 3).permute(0, 3, 1, 2), self.A1)
         f1 = feat1_out.shape[1]
+        feat1_out_bn = self.batch_norm1(feat1_out.permute(0, 1, 3, 2).contiguous().
+                                        view(n, -1, t)).view(n, -1, self.num_dir_vec_pairs, t).permute(0, 1, 3, 2)
         feat2_in = torch.zeros((n, t,
                                 ted_db.max_body_part_edges * f1,
                                 self.num_body_parts)).float().cuda()
         for idx, body_part_idx in enumerate(ted_db.body_parts_edge_idx):
             feat2_in[..., :f1 * len(body_part_idx), idx] =\
-                feat1_out[..., body_part_idx].permute(0, 2, 1, 3).contiguous().view(n, t, -1)
+                feat1_out_bn[..., body_part_idx].permute(0, 2, 1, 3).contiguous().view(n, t, -1)
         feat2_in = feat2_in.permute(0, 2, 1, 3)
         feat2_out, _ = self.st_gcn2(feat2_in, self.A2)
-        feat3_in = feat2_out.permute(0, 2, 1, 3).contiguous().view(n, t, -1).permute(0, 2, 1)
-        feat3_out = self.activation(self.batch_norm1(self.conv1(feat3_in)))
-        feat4_out = self.activation(self.batch_norm2(self.conv2(feat3_out))).permute(0, 2, 1)
+        feat2_out_bn = self.batch_norm2(feat2_out.permute(0, 1, 3, 2).contiguous().
+                                        view(n, -1, t)).view(n, -1, self.num_body_parts, t).permute(0, 1, 3, 2)
+        feat3_in = feat2_out_bn.permute(0, 2, 1, 3).contiguous().view(n, t, -1).permute(0, 2, 1)
+        feat3_out = self.activation(self.batch_norm3(self.conv3(feat3_in)))
+        feat4_out = self.activation(self.batch_norm4(self.conv4(feat3_out))).permute(0, 2, 1)
 
         return feat4_out
 

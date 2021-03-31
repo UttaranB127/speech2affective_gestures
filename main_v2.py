@@ -127,7 +127,7 @@ if args.train_s2eg:
     pr.train()
 
 pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
-                     randomized=randomized, ser_epoch='best', s2eg_epoch=227)
+                     randomized=randomized, s2eg_epoch=150)
 
 # pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
-#                                  randomized=randomized, s2eg_epoch=152)
+#                                  randomized=randomized, s2eg_epoch=150)

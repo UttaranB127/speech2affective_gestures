@@ -233,7 +233,7 @@ class Processor(object):
         audio_all = np.zeros((num_samples, self.audio_length), dtype=np.int16)
         audio_max_all = np.zeros(num_samples)
         mfcc_features_all = np.zeros((num_samples, 13, self.mfcc_length))
-        vid_indices_all = np.zeros(num_samples, dtype=np.int64)
+        # vid_indices_all = np.zeros(num_samples, dtype=np.int64)
         print('Caching {} data {:>6}/{}.'.format(part, 0, num_samples), end='')
         for k in range(num_samples):
             with data_s2eg.lmdb_env.begin(write=False) as txn:
@@ -265,19 +265,6 @@ class Processor(object):
             vec_seq_all[k] = vec_seq
             audio_all[k] = np.int16(audio / audio_max_all[k] * 32767)
             mfcc_features_all[k] = mfcc_features
-            # speaker input
-            if part == 'train' and self.train_speaker_model and\
-                    self.train_speaker_model.__class__.__name__ == 'Vocab':
-                vid_indices_all[k] = \
-                    torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
-            elif part == 'eval' and self.eval_speaker_model and\
-                    self.eval_speaker_model.__class__.__name__ == 'Vocab':
-                vid_indices_all[k] = \
-                    torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
-            elif part == 'test' and self.test_speaker_model and\
-                    self.test_speaker_model.__class__.__name__ == 'Vocab':
-                vid_indices_all[k] = \
-                    torch.LongTensor([self.test_speaker_model.word2index[aux_info['vid']]])
 
             print('\rCaching {} data {:>6}/{}.'.format(part, k + 1, num_samples), end='')
 
@@ -285,7 +272,7 @@ class Processor(object):
         np.savez_compressed(file_name,
                             extended_word_seq=extended_word_seq_all,
                             vec_seq=vec_seq_all, audio=audio_all, audio_max=audio_max_all,
-                            mfcc_features=mfcc_features_all, vid_indices=vid_indices_all)
+                            mfcc_features=mfcc_features_all)
         print(' done.')
 
     def process_data(self, data, poses, quat, trans, affs):
@@ -556,7 +543,7 @@ class Processor(object):
                     self.train_samples['audio_max'][rand_keys, None] / 32767).float().to(self.device)
                 batch_mfcc_features = torch.from_numpy(
                     self.train_samples['mfcc_features'][rand_keys]).float().to(self.device)
-                batch_vid_indices = torch.from_numpy(self.train_samples['vid_indices'][rand_keys]).to(self.device)
+                curr_vid_indices = self.train_samples['vid_indices'][rand_keys]
             else:
                 batch_extended_word_seq = torch.from_numpy(
                     self.eval_samples['extended_word_seq'][rand_keys]).to(self.device)
@@ -566,7 +553,22 @@ class Processor(object):
                     self.eval_samples['audio_max'][rand_keys, None] / 32767).float().to(self.device)
                 batch_mfcc_features = torch.from_numpy(
                     self.eval_samples['mfcc_features'][rand_keys]).float().to(self.device)
-                batch_vid_indices = torch.from_numpy(self.eval_samples['vid_indices'][rand_keys]).to(self.device)
+                curr_vid_indices = self.eval_samples['vid_indices'][rand_keys]
+
+            # speaker input
+            batch_vid_indices = None
+            if train and self.train_speaker_model and\
+                    self.train_speaker_model.__class__.__name__ == 'Vocab':
+                batch_vid_indices = torch.LongTensor([
+                    np.random.choice(np.setdiff1d(list(self.train_speaker_model.word2index.values()),
+                                                  curr_vid_indices))
+                    for _ in range(self.args.batch_size)]).to(self.device)
+            elif self.eval_speaker_model and\
+                    self.eval_speaker_model.__class__.__name__ == 'Vocab':
+                batch_vid_indices = torch.LongTensor([
+                    np.random.choice(np.setdiff1d(list(self.eval_speaker_model.word2index.values()),
+                                                  curr_vid_indices))
+                    for _ in range(self.args.batch_size)]).to(self.device)
 
             yield batch_extended_word_seq, batch_vec_seq, batch_audio, batch_mfcc_features, batch_vid_indices
 
@@ -599,7 +601,6 @@ class Processor(object):
                                          self.spectrogram_length)).float().to(self.device)
         batch_mfcc = torch.zeros((batch_size, self.num_mfcc,
                                   self.mfcc_length)).float().to(self.device)
-        batch_vid_indices = torch.zeros(batch_size).long().to(self.device)
 
         for i, k in enumerate(rand_keys):
 
@@ -631,7 +632,8 @@ class Processor(object):
                 # to tensors
                 word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
                 extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
-                                                              data_s2eg.remove_word_timing, word_seq, aux_info)
+                                                              data_s2eg.remove_word_timing, word_seq,
+                                                              aux_info, sample_end_time)
                 vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
                 pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
                 target_seq = convert_pose_seq_to_dir_vec(pose_seq)
@@ -651,9 +653,12 @@ class Processor(object):
                 batch_spectrogram[i] = spectrogram
                 batch_mfcc[i] = mfcc_features
                 # speaker input
-                if self.test_speaker_model and self.test_speaker_model.__class__.__name__ == 'Vocab':
-                    batch_vid_indices[i] = \
-                        torch.LongTensor([self.test_speaker_model.word2index[aux_info['vid']]])
+                # if self.test_speaker_model and self.test_speaker_model.__class__.__name__ == 'Vocab':
+                    # batch_vid_indices[i] = \
+                    #     torch.LongTensor([self.test_speaker_model.word2index[aux_info['vid']]])
+        batch_vid_indices = torch.LongTensor(
+            [np.random.choice(list(self.test_speaker_model.word2index.values()))
+             for _ in range(batch_size)]).to(self.device)
 
         return batch_words, batch_aux_info, batch_word_seq_tensor, batch_word_seq_lengths, \
             batch_extended_word_seq, batch_pose_seq, batch_vec_seq, batch_target_seq, batch_audio, \
@@ -999,7 +1004,7 @@ class Processor(object):
                               format(epoch, self.epoch_info['mean_s2eg_loss'])))
 
     def generate_gestures(self, samples_to_generate=10, randomized=True,
-                          load_saved_model=True, ser_epoch='best', s2eg_epoch='best'):
+                          load_saved_model=True, s2eg_epoch='best'):
 
         if load_saved_model:
             s2eg_model_found = self.load_model_at_epoch(epoch=s2eg_epoch)
@@ -1010,7 +1015,7 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        batch_size = 2048
+        batch_size = 32
 
         losses_all_trimodal = AverageMeter('loss')
         joint_mae_trimodal = AverageMeter('mae_on_joint')
@@ -1045,7 +1050,7 @@ class Processor(object):
         elapsed_time = time.time() - start_time
         if self.evaluator_trimodal and self.evaluator_trimodal.get_no_of_samples() > 0:
             frechet_dist_trimodal, feat_dist_trimodal = self.evaluator_trimodal.get_scores()
-            print('[VAL Trimodal] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+            print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
                   'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
                                                                  joint_mae_trimodal.avg, accel_trimodal.avg,
                                                                  frechet_dist_trimodal, feat_dist_trimodal,
@@ -1053,27 +1058,28 @@ class Processor(object):
             loss_dict['frechet_trimodal'] = frechet_dist_trimodal
             loss_dict['feat_dist_trimodal'] = feat_dist_trimodal
         else:
-            print('[VAL Trimodal] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
-                                                                           joint_mae_trimodal.avg,
-                                                                           elapsed_time))
+            print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
+                                                                                     joint_mae_trimodal.avg,
+                                                                                     elapsed_time))
 
         if self.evaluator and self.evaluator.get_no_of_samples() > 0:
             frechet_dist, feat_dist = self.evaluator.get_scores()
-            print('[VAL Ours] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+            print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
                   'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg, accel.avg,
                                                                  frechet_dist, feat_dist, elapsed_time))
             loss_dict['frechet'] = frechet_dist
             loss_dict['feat_dist'] = feat_dist
         else:
-            print('[VAL Ours] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg,
-                                                                                elapsed_time))
+            print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg,
+                                                                                   joint_mae.avg,
+                                                                                   elapsed_time))
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 
     def generate_gestures_by_env_file(self, env_file, clip_duration_range=None,
                                       audio_sr=16000, randomized=True, fade_out=False,
                                       load_saved_model=True, s2eg_epoch='best',
-                                      make_video=True, save_pkl=True):
+                                      make_video=False, save_pkl=False):
 
         if clip_duration_range is None:
             clip_duration_range = [5, 12]
@@ -1400,7 +1406,7 @@ class Processor(object):
         elapsed_time = time.time() - start_time
         if self.evaluator_trimodal and self.evaluator_trimodal.get_no_of_samples() > 0:
             frechet_dist_trimodal, feat_dist_trimodal = self.evaluator_trimodal.get_scores()
-            print('[VAL Trimodal] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+            print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
                   'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
                                                                  joint_mae_trimodal.avg, accel_trimodal.avg,
                                                                  frechet_dist_trimodal, feat_dist_trimodal,
@@ -1408,19 +1414,20 @@ class Processor(object):
             loss_dict['frechet_trimodal'] = frechet_dist_trimodal
             loss_dict['feat_dist_trimodal'] = feat_dist_trimodal
         else:
-            print('[VAL Trimodal] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
-                                                                           joint_mae_trimodal.avg,
-                                                                           elapsed_time))
+            print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
+                                                                                    joint_mae_trimodal.avg,
+                                                                                    elapsed_time))
 
         if self.evaluator and self.evaluator.get_no_of_samples() > 0:
             frechet_dist, feat_dist = self.evaluator.get_scores()
-            print('[VAL Ours] loss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+            print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
                   'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg, accel.avg,
                                                                  frechet_dist, feat_dist, elapsed_time))
             loss_dict['frechet'] = frechet_dist
             loss_dict['feat_dist'] = feat_dist
         else:
-            print('[VAL Ours] loss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg,
-                                                                                elapsed_time))
+            print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg,
+                                                                                   joint_mae.avg,
+                                                                                   elapsed_time))
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - overall_start_time))

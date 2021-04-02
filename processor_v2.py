@@ -1003,8 +1003,8 @@ class Processor(object):
                            jn(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
                               format(epoch, self.epoch_info['mean_s2eg_loss'])))
 
-    def generate_gestures(self, samples_to_generate=10, randomized=True,
-                          load_saved_model=True, s2eg_epoch='best'):
+    def generate_gestures(self, samples_to_generate=10, randomized=True, load_saved_model=True,
+                          s2eg_epoch='best', make_video=False, calculate_metrics=True):
 
         if load_saved_model:
             s2eg_model_found = self.load_model_at_epoch(epoch=s2eg_epoch)
@@ -1015,7 +1015,7 @@ class Processor(object):
         self.trimodal_generator.eval()
         self.s2eg_generator.eval()
         self.s2eg_discriminator.eval()
-        batch_size = 32
+        batch_size = 2048
 
         losses_all_trimodal = AverageMeter('loss')
         joint_mae_trimodal = AverageMeter('mae_on_joint')
@@ -1027,10 +1027,10 @@ class Processor(object):
 
         start_time = time.time()
         for sample_idx in np.arange(0, samples_to_generate, batch_size):
-            samples_curr = min(batch_size, samples_to_generate - sample_idx)
+            samples_curr = np.arange(sample_idx, sample_idx + min(batch_size, samples_to_generate - sample_idx))
             words, aux_info, word_seq_tensor, word_seq_lengths, extended_word_seq, \
                 pose_seq, vec_seq, target_seq, audio, spectrogram, mfcc_features, vid_indices = \
-                self.return_batch([samples_curr], randomized=randomized)
+                self.return_batch(samples_curr, randomized=randomized)
             with torch.no_grad():
                 loss_dict, losses_all_trimodal, joint_mae_trimodal,\
                     accel_trimodal, losses_all, joint_mae, accel = \
@@ -1038,7 +1038,7 @@ class Processor(object):
                                            vec_seq, vid_indices, train=False,
                                            target_seq=target_seq, words=words, aux_info=aux_info,
                                            save_path=self.args.video_save_path,
-                                           make_video=False, calculate_metrics=True,
+                                           make_video=make_video, calculate_metrics=calculate_metrics,
                                            losses_all_trimodal=losses_all_trimodal,
                                            joint_mae_trimodal=joint_mae_trimodal, accel_trimodal=accel_trimodal,
                                            losses_all=losses_all, joint_mae=joint_mae, accel=accel)
@@ -1122,7 +1122,13 @@ class Processor(object):
                 n_clips = len(clips)
                 if n_clips == 0:
                     continue
-                clip_idx = np.random.randint(0, n_clips)
+                if randomized:
+                    clip_idx = np.random.randint(0, n_clips)
+                    vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
+                else:
+                    clip_idx = 0
+                    vid_idx = 0
+
                 clip_poses = clips[clip_idx]['skeletons_3d']
                 clip_audio = clips[clip_idx]['audio_raw']
                 clip_words = clips[clip_idx]['words']
@@ -1144,8 +1150,6 @@ class Processor(object):
                 for selected_vi in range(len(clip_words)):  # make start time of input text zero
                     clip_words[selected_vi][1] -= clip_time[0]  # start time
                     clip_words[selected_vi][2] -= clip_time[0]  # end time
-
-                vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
 
                 out_list_trimodal = []
                 out_list = []
@@ -1187,7 +1191,7 @@ class Processor(object):
 
                 # prepare speaker input
                 if self.s2eg_config_args.z_type == 'speaker':
-                    if not vid_idx:
+                    if vid_idx is None:
                         vid_idx = np.random.randint(0, self.s2eg_generator.z_obj.n_words)
                     print('vid idx:', vid_idx)
                     vid_idx = torch.LongTensor([vid_idx]).to(self.device)
@@ -1244,8 +1248,8 @@ class Processor(object):
                     # prepare target seq and pre seq
                     if sub_div_idx > 0:
                         target_seq = torch.zeros_like(out_dir_vec)
-                        start_idx = n_frames * sub_div_idx
-                        end_idx = min(n_frames_total, n_frames * (sub_div_idx + 1))
+                        start_idx = n_frames * (sub_div_idx - 1)
+                        end_idx = min(n_frames_total, n_frames * sub_div_idx)
                         target_seq[0, :(end_idx - start_idx)] = torch.from_numpy(
                             target_dir_vec[start_idx:end_idx]) \
                             .unsqueeze(0).float().to(self.device)

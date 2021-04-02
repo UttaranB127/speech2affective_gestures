@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 base_path = os.path.dirname(os.path.realpath(__file__))
 data_path = j(base_path, '../../data')
 
-models_s2eg_path = j(base_path, 'models', 's2eg_v2_mfcc')
+models_s2eg_path = j(base_path, 'models', 's2eg_v2_mfcc_run_3')
 
 
 def str2bool(v):
@@ -54,7 +54,7 @@ parser.add_argument('--batch-size', type=int, default=512, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--s2eg-start-epoch', type=int, default=0, metavar='S2EG-SE',
+parser.add_argument('--s2eg-start-epoch', type=int, default=190, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
 parser.add_argument('--s2eg-num-epoch', type=int, default=500, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')
@@ -126,8 +126,9 @@ pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, 
 if args.train_s2eg:
     pr.train()
 
-pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
-                     randomized=randomized, s2eg_epoch=150)
+# pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
+#                      randomized=randomized, s2eg_epoch=150, make_video=False)
 
-# pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
-#                                  randomized=randomized, s2eg_epoch=150)
+# pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 30],
+#                                  randomized=randomized, s2eg_epoch=60,
+#                                  make_video=True)

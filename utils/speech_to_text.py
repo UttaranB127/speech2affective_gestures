@@ -106,7 +106,7 @@ for speaker in speakers:
     num_audio_files = len(audio_files)
     for file_idx, audio_file in enumerate(audio_files):
         file_base = '.wav'.join(audio_file.split('/')[-1].split('.wav')[:-1])
-        print('Speaker: {}. Audio_file: {:>6}/{:>6}: {}.'.format(speaker, file_idx + 1, num_audio_files, file_base))
+        print('Speaker: {}. Audio_file {:>6}/{:>6}: {}.'.format(speaker, file_idx + 1, num_audio_files, file_base))
         text_file = os.path.join(text_dir, file_base + '.txt')
         if not os.path.exists(text_file):
             silence_based_conversion(audio_file, text_file, chunk_dir=tmp_dir,

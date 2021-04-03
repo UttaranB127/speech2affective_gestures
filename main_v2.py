@@ -36,7 +36,9 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
 parser.add_argument('--dataset-s2eg', type=str, default='ted_db', metavar='D-S2G',
-                    help='dataset to train and evaluate speech to emotive gestures (default: ted)')
+                    help='dataset to train and evaluate speech to emotive gestures (default: ted_db)')
+parser.add_argument('--dataset-test', type=str, default='s2g', metavar='D-TST',
+                    help='dataset to test emotive gestures (default: ted_db)')
 parser.add_argument('-dap', '--dataset-s2eg-already-processed',
                     help='Optional. Set to True if dataset has already been processed.' +
                          'If not, or if you are not sure, set it to False.',
@@ -44,7 +46,7 @@ parser.add_argument('-dap', '--dataset-s2eg-already-processed',
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
-parser.add_argument('--train-s2eg', type=bool, default=True, metavar='T-S2EG',
+parser.add_argument('--train-s2eg', type=bool, default=False, metavar='T-S2EG',
                     help='train the s2eg model (default: True)')
 parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
@@ -54,7 +56,7 @@ parser.add_argument('--batch-size', type=int, default=512, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--s2eg-start-epoch', type=int, default=190, metavar='S2EG-SE',
+parser.add_argument('--s2eg-start-epoch', type=int, default=290, metavar='S2EG-SE',
                     help='starting epoch of training of s2eg (default: 0)')
 parser.add_argument('--s2eg-num-epoch', type=int, default=500, metavar='S2EG-NE',
                     help='number of epochs to train s2eg (default: 1000)')
@@ -127,8 +129,11 @@ if args.train_s2eg:
     pr.train()
 
 # pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
-#                      randomized=randomized, s2eg_epoch=150, make_video=False)
+#                      randomized=randomized, s2eg_epoch=310, make_video=False)
 
-# pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 30],
-#                                  randomized=randomized, s2eg_epoch=60,
-#                                  make_video=True)
+pr.generate_gestures_by_dataset(dataset=args.dataset_test,
+                                data_params={'env_file': j(data_path, 'ted_db/lmdb_test'),
+                                             'clip_duration_range': [5, 30],
+                                             'audio_sr': 16000},
+                                randomized=randomized, s2eg_epoch=290,
+                                make_video=True, save_pkl=True)

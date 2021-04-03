@@ -1076,13 +1076,10 @@ class Processor(object):
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - start_time))
 
-    def generate_gestures_by_env_file(self, env_file, clip_duration_range=None,
-                                      audio_sr=16000, randomized=True, fade_out=False,
-                                      load_saved_model=True, s2eg_epoch='best',
-                                      make_video=False, save_pkl=False):
-
-        if clip_duration_range is None:
-            clip_duration_range = [5, 12]
+    def generate_gestures_by_dataset(self, dataset, data_params,
+                                     randomized=True, fade_out=False,
+                                     load_saved_model=True, s2eg_epoch='best',
+                                     make_video=False, save_pkl=False):
 
         if load_saved_model:
             s2eg_model_found = self.load_model_at_epoch(epoch=s2eg_epoch)
@@ -1103,324 +1100,345 @@ class Processor(object):
         accel = AverageMeter('accel')
 
         overall_start_time = time.time()
-        lmdb_env = lmdb.open(env_file, readonly=True, lock=False)
-        with lmdb_env.begin(write=False) as txn:
-            keys = [key for key, _ in txn.cursor()]
-            samples_to_generate = len(keys)
-            print('Total samples to generate: {}'.format(samples_to_generate))
-            for sample_idx in range(samples_to_generate):  # loop until we get the desired number of results
-                start_time = time.time()
-                # select video
-                if randomized:
-                    key = np.random.choice(keys)
-                else:
-                    key = keys[sample_idx]
-                buf = txn.get(key)
-                video = pyarrow.deserialize(buf)
-                vid_name = video['vid']
-                clips = video['clips']
-                n_clips = len(clips)
-                if n_clips == 0:
-                    continue
-                if randomized:
-                    clip_idx = np.random.randint(0, n_clips)
-                    vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
-                else:
-                    clip_idx = 0
-                    vid_idx = 0
 
-                clip_poses = clips[clip_idx]['skeletons_3d']
-                clip_audio = clips[clip_idx]['audio_raw']
-                clip_words = clips[clip_idx]['words']
-                clip_time = [clips[clip_idx]['start_time'], clips[clip_idx]['end_time']]
+        if dataset.lower() == 'ted_db':
+            if 'clip_duration_range' not in data_params.keys():
+                data_params['clip_duration_range'] = [5, 12]
+            lmdb_env = lmdb.open(data_params['env_file'], readonly=True, lock=False)
+            with lmdb_env.begin(write=False) as txn:
+                keys = [key for key, _ in txn.cursor()]
+                samples_to_generate = len(keys)
+                print('Total samples to generate: {}'.format(samples_to_generate))
+                for sample_idx in range(samples_to_generate):  # loop until we get the desired number of results
+                    start_time = time.time()
+                    # select video
+                    if randomized:
+                        key = np.random.choice(keys)
+                    else:
+                        key = keys[sample_idx]
+                    buf = txn.get(key)
+                    video = pyarrow.deserialize(buf)
+                    vid_name = video['vid']
+                    clips = video['clips']
+                    n_clips = len(clips)
+                    if n_clips == 0:
+                        continue
+                    if randomized:
+                        clip_idx = np.random.randint(0, n_clips)
+                        vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
+                    else:
+                        clip_idx = 0
+                        vid_idx = 0
 
-                clip_poses = resample_pose_seq(clip_poses, clip_time[1] - clip_time[0],
-                                               self.s2eg_config_args.motion_resampling_framerate)
-                target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses)
-                target_dir_vec = target_dir_vec.reshape(target_dir_vec.shape[0], -1)
-                target_dir_vec -= mean_dir_vec
-                n_frames_total = len(target_dir_vec)
+                    clip_poses = clips[clip_idx]['skeletons_3d']
+                    clip_audio = clips[clip_idx]['audio_raw']
+                    clip_words = clips[clip_idx]['words']
+                    clip_time = [clips[clip_idx]['start_time'], clips[clip_idx]['end_time']]
 
-                # check duration
-                clip_duration = clip_time[1] - clip_time[0]
-                if clip_duration < clip_duration_range[0] or clip_duration > clip_duration_range[1]:
-                    continue
+                    clip_poses = resample_pose_seq(clip_poses, clip_time[1] - clip_time[0],
+                                                   self.s2eg_config_args.motion_resampling_framerate)
+                    target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses)
+                    target_dir_vec = target_dir_vec.reshape(target_dir_vec.shape[0], -1)
+                    target_dir_vec -= mean_dir_vec
+                    n_frames_total = len(target_dir_vec)
 
-                # synthesize
-                for selected_vi in range(len(clip_words)):  # make start time of input text zero
-                    clip_words[selected_vi][1] -= clip_time[0]  # start time
-                    clip_words[selected_vi][2] -= clip_time[0]  # end time
+                    # check duration
+                    clip_duration = clip_time[1] - clip_time[0]
+                    if clip_duration < data_params['clip_duration_range'][0] or\
+                            clip_duration > data_params['clip_duration_range'][1]:
+                        continue
 
-                out_list_trimodal = []
-                out_list = []
-                n_frames = self.s2eg_config_args.n_poses
-                clip_length = len(clip_audio) / audio_sr
-                seed_seq = target_dir_vec[0:self.s2eg_config_args.n_pre_poses]
+                    # synthesize
+                    for selected_vi in range(len(clip_words)):  # make start time of input text zero
+                        clip_words[selected_vi][1] -= clip_time[0]  # start time
+                        clip_words[selected_vi][2] -= clip_time[0]  # end time
 
-                # pre seq
-                pre_seq_trimodal = torch.zeros((1, n_frames, self.pose_dim + 1))
-                if seed_seq is not None:
-                    pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                        torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
-                    # indicating bit for seed poses
-                    pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
+                    out_list_trimodal = []
+                    out_list = []
+                    n_frames = self.s2eg_config_args.n_poses
+                    clip_length = len(clip_audio) / data_params['audio_sr']
+                    seed_seq = target_dir_vec[0:self.s2eg_config_args.n_pre_poses]
 
-                pre_seq = torch.zeros((1, n_frames, self.pose_dim + 1))
-                if seed_seq is not None:
-                    pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                        torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
-                    # indicating bit for seed poses
-                    pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
-
-                # target seq
-                target_seq = torch.from_numpy(target_dir_vec[0:n_frames]).unsqueeze(0).float().to(self.device)
-
-                spectrogram = None
-
-                # divide into synthesize units and do synthesize
-                unit_time = self.s2eg_config_args.n_poses / self.s2eg_config_args.motion_resampling_framerate
-                stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) / \
-                    self.s2eg_config_args.motion_resampling_framerate
-                if clip_length < unit_time:
-                    num_subdivisions = 1
-                else:
-                    num_subdivisions = math.ceil((clip_length - unit_time) / stride_time)
-                spectrogram_sample_length = int(round(unit_time * audio_sr / 512))
-                audio_sample_length = int(unit_time * audio_sr)
-                end_padding_duration = 0
-
-                # prepare speaker input
-                if self.s2eg_config_args.z_type == 'speaker':
-                    if vid_idx is None:
-                        vid_idx = np.random.randint(0, self.s2eg_generator.z_obj.n_words)
-                    print('vid idx:', vid_idx)
-                    vid_idx = torch.LongTensor([vid_idx]).to(self.device)
-                else:
-                    vid_idx = None
-
-                print('Sample {} of {}'.format(sample_idx + 1, samples_to_generate))
-                print('Subdivisions\t|\tUnit Time\t|\tClip Length\t|\tStride Time\t|\tAudio Sample Length')
-                print('{}\t\t\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{}'.format(num_subdivisions,
-                                                                                      unit_time, clip_length,
-                                                                                      stride_time,
-                                                                                      audio_sample_length))
-
-                out_dir_vec_trimodal = None
-                out_dir_vec = None
-                for sub_div_idx in range(0, num_subdivisions):
-                    overall_start_time = sub_div_idx * stride_time
-                    end_time = overall_start_time + unit_time
-
-                    # prepare spectrogram input
-                    in_spec = None
-
-                    # prepare audio input
-                    audio_start = math.floor(overall_start_time / clip_length * len(clip_audio))
-                    audio_end = audio_start + audio_sample_length
-                    in_audio_np = clip_audio[audio_start:audio_end]
-                    if len(in_audio_np) < audio_sample_length:
-                        if sub_div_idx == num_subdivisions - 1:
-                            end_padding_duration = audio_sample_length - len(in_audio_np)
-                        in_audio_np = np.pad(in_audio_np, (0, audio_sample_length - len(in_audio_np)), 'constant')
-                    in_mfcc = torch.from_numpy(mfcc(in_audio_np, sr=16000, n_mfcc=self.num_mfcc) / 1000.).\
-                        unsqueeze(0).to(self.device).float()
-                    in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
-
-                    # prepare text input
-                    word_seq = DataPreprocessor.get_words_in_time_range(word_list=clip_words,
-                                                                        start_time=overall_start_time,
-                                                                        end_time=end_time)
-                    extended_word_indices = np.zeros(n_frames)  # zero is the index of padding token
-                    word_indices = np.zeros(len(word_seq) + 2)
-                    word_indices[0] = self.lang_model.SOS_token
-                    word_indices[-1] = self.lang_model.EOS_token
-                    frame_duration = (end_time - overall_start_time) / n_frames
-                    print('Subdivision {} of {}. Words: '.format(sub_div_idx + 1, num_subdivisions), end='')
-                    for w_i, word in enumerate(word_seq):
-                        print(word[0], end=', ')
-                        idx = max(0, int(np.floor((word[1] - overall_start_time) / frame_duration)))
-                        extended_word_indices[idx] = self.lang_model.get_word_index(word[0])
-                        word_indices[w_i + 1] = self.lang_model.get_word_index(word[0])
-                    print('\b\b', end='.\n')
-                    in_text_padded = torch.LongTensor(extended_word_indices).unsqueeze(0).to(self.device)
-                    in_text = torch.LongTensor(word_indices).unsqueeze(0).to(self.device)
-
-                    # prepare target seq and pre seq
-                    if sub_div_idx > 0:
-                        target_seq = torch.zeros_like(out_dir_vec)
-                        start_idx = n_frames * (sub_div_idx - 1)
-                        end_idx = min(n_frames_total, n_frames * sub_div_idx)
-                        target_seq[0, :(end_idx - start_idx)] = torch.from_numpy(
-                            target_dir_vec[start_idx:end_idx]) \
-                            .unsqueeze(0).float().to(self.device)
-
+                    # pre seq
+                    pre_seq_trimodal = torch.zeros((1, n_frames, self.pose_dim + 1))
+                    if seed_seq is not None:
                         pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                            out_dir_vec_trimodal.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
-                        # indicating bit for constraints
+                            torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
+                        # indicating bit for seed poses
                         pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
 
+                    pre_seq = torch.zeros((1, n_frames, self.pose_dim + 1))
+                    if seed_seq is not None:
                         pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                            out_dir_vec.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
-                        pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
+                            torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
+                        # indicating bit for seed poses
+                        pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
 
-                    pre_seq_trimodal = pre_seq_trimodal.float().to(self.device)
-                    pre_seq = pre_seq.float().to(self.device)
+                    # target seq
+                    target_seq = torch.from_numpy(target_dir_vec[0:n_frames]).unsqueeze(0).float().to(self.device)
 
-                    out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq_trimodal,
-                                                                       in_text_padded, in_audio, vid_idx)
-                    out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_mfcc, vid_idx)
+                    spectrogram = None
 
-                    self.evaluator_trimodal, losses_all_trimodal, joint_mae_trimodal, accel_trimodal = \
-                        Processor.push_samples(self.evaluator_trimodal, target_seq, out_dir_vec_trimodal,
-                                               in_text, in_audio, losses_all_trimodal, joint_mae_trimodal,
-                                               accel_trimodal,
-                                               self.s2eg_config_args.mean_dir_vec, self.s2eg_config_args.n_poses,
-                                               self.s2eg_config_args.n_pre_poses)
-                    self.evaluator, losses_all, joint_mae, accel = \
-                        Processor.push_samples(self.evaluator, target_seq, out_dir_vec,
-                                               in_text, in_audio, losses_all, joint_mae, accel,
-                                               self.s2eg_config_args.mean_dir_vec, self.s2eg_config_args.n_poses,
-                                               self.s2eg_config_args.n_pre_poses)
+                    # divide into synthesize units and do synthesize
+                    unit_time = self.s2eg_config_args.n_poses / \
+                        self.s2eg_config_args.motion_resampling_framerate
+                    stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) / \
+                        self.s2eg_config_args.motion_resampling_framerate
+                    if clip_length < unit_time:
+                        num_subdivisions = 1
+                    else:
+                        num_subdivisions = math.ceil((clip_length - unit_time) / stride_time)
+                    spectrogram_sample_length = int(round(unit_time * data_params['audio_sr'] / 512))
+                    audio_sample_length = int(unit_time * data_params['audio_sr'])
+                    end_padding_duration = 0
 
-                    out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
-                    out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
+                    # prepare speaker input
+                    if self.s2eg_config_args.z_type == 'speaker':
+                        if vid_idx is None:
+                            vid_idx = np.random.randint(0, self.s2eg_generator.z_obj.n_words)
+                        print('vid idx:', vid_idx)
+                        vid_idx = torch.LongTensor([vid_idx]).to(self.device)
+                    else:
+                        vid_idx = None
 
-                    # smoothing motion transition
-                    if len(out_list_trimodal) > 0:
-                        last_poses = out_list_trimodal[-1][-self.s2eg_config_args.n_pre_poses:]
-                        # delete last 4 frames
-                        out_list_trimodal[-1] = out_list_trimodal[-1][:-self.s2eg_config_args.n_pre_poses]
+                    print('Sample {} of {}'.format(sample_idx + 1, samples_to_generate))
+                    print('Subdivisions\t|\tUnit Time\t|\tClip Length\t|\tStride Time\t|\tAudio Sample Length')
+                    print('{}\t\t\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{}'.
+                          format(num_subdivisions, unit_time, clip_length,
+                                 stride_time, audio_sample_length))
 
-                        for j in range(len(last_poses)):
-                            n = len(last_poses)
-                            prev_pose = last_poses[j]
-                            next_pose = out_seq_trimodal[j]
-                            out_seq_trimodal[j] = prev_pose * (n - j) / (n + 1) + next_pose * (j + 1) / (n + 1)
+                    out_dir_vec_trimodal = None
+                    out_dir_vec = None
+                    for sub_div_idx in range(0, num_subdivisions):
+                        overall_start_time = sub_div_idx * stride_time
+                        end_time = overall_start_time + unit_time
 
-                    out_list_trimodal.append(out_seq_trimodal)
+                        # prepare spectrogram input
+                        in_spec = None
 
-                    if len(out_list) > 0:
-                        last_poses = out_list[-1][-self.s2eg_config_args.n_pre_poses:]
-                        out_list[-1] = out_list[-1][:-self.s2eg_config_args.n_pre_poses]  # delete last 4 frames
+                        # prepare audio input
+                        audio_start = math.floor(overall_start_time / clip_length * len(clip_audio))
+                        audio_end = audio_start + audio_sample_length
+                        in_audio_np = clip_audio[audio_start:audio_end]
+                        if len(in_audio_np) < audio_sample_length:
+                            if sub_div_idx == num_subdivisions - 1:
+                                end_padding_duration = audio_sample_length - len(in_audio_np)
+                            in_audio_np = np.pad(in_audio_np, (0, audio_sample_length - len(in_audio_np)),
+                                                 'constant')
+                        in_mfcc = torch.from_numpy(mfcc(in_audio_np, sr=16000, n_mfcc=self.num_mfcc) / 1000.).\
+                            unsqueeze(0).to(self.device).float()
+                        in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
 
-                        for j in range(len(last_poses)):
-                            n = len(last_poses)
-                            prev_pose = last_poses[j]
-                            next_pose = out_seq[j]
-                            out_seq[j] = prev_pose * (n - j) / (n + 1) + next_pose * (j + 1) / (n + 1)
+                        # prepare text input
+                        word_seq = DataPreprocessor.get_words_in_time_range(word_list=clip_words,
+                                                                            start_time=overall_start_time,
+                                                                            end_time=end_time)
+                        extended_word_indices = np.zeros(n_frames)  # zero is the index of padding token
+                        word_indices = np.zeros(len(word_seq) + 2)
+                        word_indices[0] = self.lang_model.SOS_token
+                        word_indices[-1] = self.lang_model.EOS_token
+                        frame_duration = (end_time - overall_start_time) / n_frames
+                        print('Subdivision {} of {}. Words: '.format(sub_div_idx + 1, num_subdivisions), end='')
+                        for w_i, word in enumerate(word_seq):
+                            print(word[0], end=', ')
+                            idx = max(0, int(np.floor((word[1] - overall_start_time) / frame_duration)))
+                            extended_word_indices[idx] = self.lang_model.get_word_index(word[0])
+                            word_indices[w_i + 1] = self.lang_model.get_word_index(word[0])
+                        print('\b\b', end='.\n')
+                        in_text_padded = torch.LongTensor(extended_word_indices).unsqueeze(0).to(self.device)
+                        in_text = torch.LongTensor(word_indices).unsqueeze(0).to(self.device)
 
-                    out_list.append(out_seq)
+                        # prepare target seq and pre seq
+                        if sub_div_idx > 0:
+                            target_seq = torch.zeros_like(out_dir_vec)
+                            start_idx = n_frames * (sub_div_idx - 1)
+                            end_idx = min(n_frames_total, n_frames * sub_div_idx)
+                            target_seq[0, :(end_idx - start_idx)] = torch.from_numpy(
+                                target_dir_vec[start_idx:end_idx]) \
+                                .unsqueeze(0).float().to(self.device)
 
-                # aggregate results
-                out_dir_vec_trimodal = np.vstack(out_list_trimodal)
-                out_dir_vec = np.vstack(out_list)
+                            pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
+                                out_dir_vec_trimodal.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
+                            # indicating bit for constraints
+                            pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
 
-                # fade out to the mean pose
-                if fade_out:
-                    n_smooth = self.s2eg_config_args.n_pre_poses
-                    start_frame = len(out_dir_vec_trimodal) - \
-                                  int(
-                                      end_padding_duration / audio_sr * self.s2eg_config_args.motion_resampling_framerate)
-                    end_frame = start_frame + n_smooth * 2
-                    if len(out_dir_vec_trimodal) < end_frame:
-                        out_dir_vec_trimodal = np.pad(out_dir_vec_trimodal,
-                                                      [(0, end_frame - len(out_dir_vec_trimodal)), (0, 0)],
-                                                      mode='constant')
-                    out_dir_vec_trimodal[end_frame - n_smooth:] = \
-                        np.zeros(self.pose_dim)  # fade out to mean poses
+                            pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
+                                out_dir_vec.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
+                            # indicating bit for constraints
+                            pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
 
-                    n_smooth = self.s2eg_config_args.n_pre_poses
-                    start_frame = len(out_dir_vec) - \
-                                  int(
-                                      end_padding_duration / audio_sr * self.s2eg_config_args.motion_resampling_framerate)
-                    end_frame = start_frame + n_smooth * 2
-                    if len(out_dir_vec) < end_frame:
-                        out_dir_vec = np.pad(out_dir_vec, [(0, end_frame - len(out_dir_vec)), (0, 0)], mode='constant')
-                    out_dir_vec[end_frame - n_smooth:] = \
-                        np.zeros(self.pose_dim)  # fade out to mean poses
+                        pre_seq_trimodal = pre_seq_trimodal.float().to(self.device)
+                        pre_seq = pre_seq.float().to(self.device)
 
-                    # interpolation
-                    y_trimodal = out_dir_vec_trimodal[start_frame:end_frame]
-                    y = out_dir_vec[start_frame:end_frame]
-                    x = np.array(range(0, y.shape[0]))
-                    w = np.ones(len(y))
-                    w[0] = 5
-                    w[-1] = 5
+                        out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq_trimodal,
+                                                                           in_text_padded, in_audio, vid_idx)
+                        out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_mfcc, vid_idx)
 
-                    co_effs_trimodal = np.polyfit(x, y_trimodal, 2, w=w)
-                    fit_functions_trimodal = [np.poly1d(co_effs_trimodal[:, k]) for k in range(0, y_trimodal.shape[1])]
-                    interpolated_y_trimodal = [fit_functions_trimodal[k](x) for k in range(0, y_trimodal.shape[1])]
-                    interpolated_y_trimodal = np.transpose(np.asarray(interpolated_y_trimodal))  # (num_frames x dims)
+                        self.evaluator_trimodal, losses_all_trimodal, joint_mae_trimodal, accel_trimodal = \
+                            Processor.push_samples(self.evaluator_trimodal, target_seq, out_dir_vec_trimodal,
+                                                   in_text, in_audio, losses_all_trimodal, joint_mae_trimodal,
+                                                   accel_trimodal,
+                                                   self.s2eg_config_args.mean_dir_vec,
+                                                   self.s2eg_config_args.n_poses,
+                                                   self.s2eg_config_args.n_pre_poses)
+                        self.evaluator, losses_all, joint_mae, accel = \
+                            Processor.push_samples(self.evaluator, target_seq, out_dir_vec,
+                                                   in_text, in_audio, losses_all, joint_mae, accel,
+                                                   self.s2eg_config_args.mean_dir_vec,
+                                                   self.s2eg_config_args.n_poses,
+                                                   self.s2eg_config_args.n_pre_poses)
 
-                    co_effs = np.polyfit(x, y, 2, w=w)
-                    fit_functions = [np.poly1d(co_effs[:, k]) for k in range(0, y.shape[1])]
-                    interpolated_y = [fit_functions[k](x) for k in range(0, y.shape[1])]
-                    interpolated_y = np.transpose(np.asarray(interpolated_y))  # (num_frames x dims)
+                        out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
+                        out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
 
-                    out_dir_vec_trimodal[start_frame:end_frame] = interpolated_y_trimodal
-                    out_dir_vec[start_frame:end_frame] = interpolated_y
+                        # smoothing motion transition
+                        if len(out_list_trimodal) > 0:
+                            last_poses = out_list_trimodal[-1][-self.s2eg_config_args.n_pre_poses:]
+                            # delete last 4 frames
+                            out_list_trimodal[-1] = out_list_trimodal[-1][:-self.s2eg_config_args.n_pre_poses]
 
-                # make a video
-                if make_video:
-                    sentence_words = []
-                    for word, _, _ in clip_words:
-                        sentence_words.append(word)
-                    sentence = ' '.join(sentence_words)
+                            for j in range(len(last_poses)):
+                                n = len(last_poses)
+                                prev_pose = last_poses[j]
+                                next_pose = out_seq_trimodal[j]
+                                out_seq_trimodal[j] = prev_pose * (n - j) / (n + 1) +\
+                                    next_pose * (j + 1) / (n + 1)
 
-                    filename_prefix = '{}_{}_{}'.format(vid_name, vid_idx, clip_idx)
-                    filename_prefix_for_video = filename_prefix
-                    aux_str = '({}, time: {}-{})'.format(vid_name, str(datetime.timedelta(seconds=clip_time[0])),
-                                                         str(datetime.timedelta(seconds=clip_time[1])))
-                    create_video_and_save(
-                        self.args.video_save_path, 0, filename_prefix_for_video, 0, target_dir_vec,
-                        out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
-                        audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
-                        delete_audio_file=False)
-                    print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.
-                          format(sample_idx + 1, samples_to_generate, time.time() - start_time))
+                        out_list_trimodal.append(out_seq_trimodal)
 
-                # save pkl
-                if save_pkl:
-                    out_dir_vec_trimodal = out_dir_vec_trimodal + mean_dir_vec
-                    out_poses_trimodal = convert_dir_vec_to_pose(out_dir_vec_trimodal)
+                        if len(out_list) > 0:
+                            last_poses = out_list[-1][-self.s2eg_config_args.n_pre_poses:]
+                            # delete last 4 frames
+                            out_list[-1] = out_list[-1][:-self.s2eg_config_args.n_pre_poses]
 
-                    save_dict = {
-                        'sentence': sentence, 'audio': clip_audio.astype(np.float32),
-                        'out_dir_vec': out_dir_vec_trimodal, 'out_poses': out_poses_trimodal,
-                        'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
-                        'human_dir_vec': target_dir_vec + mean_dir_vec,
-                    }
-                    with open(jn(self.args.video_save_path, '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
-                        pickle.dump(save_dict, f)
+                            for j in range(len(last_poses)):
+                                n = len(last_poses)
+                                prev_pose = last_poses[j]
+                                next_pose = out_seq[j]
+                                out_seq[j] = prev_pose * (n - j) / (n + 1) + next_pose * (j + 1) / (n + 1)
 
-                    out_dir_vec = out_dir_vec + mean_dir_vec
-                    out_poses = convert_dir_vec_to_pose(out_dir_vec)
+                        out_list.append(out_seq)
 
-                    save_dict = {
-                        'sentence': sentence, 'audio': clip_audio.astype(np.float32),
-                        'out_dir_vec': out_dir_vec, 'out_poses': out_poses,
-                        'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
-                        'human_dir_vec': target_dir_vec + mean_dir_vec,
-                    }
-                    with open(jn(self.args.video_save_path, '{}.pkl'.format(filename_prefix)), 'wb') as f:
-                        pickle.dump(save_dict, f)
+                    # aggregate results
+                    out_dir_vec_trimodal = np.vstack(out_list_trimodal)
+                    out_dir_vec = np.vstack(out_list)
 
-        # print metrics
-        loss_dict = {'loss': losses_all.avg, 'joint_mae': joint_mae.avg}
-        elapsed_time = time.time() - start_time
-        if self.evaluator_trimodal and self.evaluator_trimodal.get_no_of_samples() > 0:
-            frechet_dist_trimodal, feat_dist_trimodal = self.evaluator_trimodal.get_scores()
-            print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
-                  'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
-                                                                 joint_mae_trimodal.avg, accel_trimodal.avg,
-                                                                 frechet_dist_trimodal, feat_dist_trimodal,
-                                                                 elapsed_time))
-            loss_dict['frechet_trimodal'] = frechet_dist_trimodal
-            loss_dict['feat_dist_trimodal'] = feat_dist_trimodal
-        else:
-            print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
-                                                                                    joint_mae_trimodal.avg,
-                                                                                    elapsed_time))
+                    # fade out to the mean pose
+                    if fade_out:
+                        n_smooth = self.s2eg_config_args.n_pre_poses
+                        start_frame = len(out_dir_vec_trimodal) - \
+                            int(end_padding_duration / data_params['audio_sr']
+                                * self.s2eg_config_args.motion_resampling_framerate)
+                        end_frame = start_frame + n_smooth * 2
+                        if len(out_dir_vec_trimodal) < end_frame:
+                            out_dir_vec_trimodal = np.pad(out_dir_vec_trimodal,
+                                                          [(0, end_frame - len(out_dir_vec_trimodal)), (0, 0)],
+                                                          mode='constant')
+                        out_dir_vec_trimodal[end_frame - n_smooth:] = \
+                            np.zeros(self.pose_dim)  # fade out to mean poses
+
+                        n_smooth = self.s2eg_config_args.n_pre_poses
+                        start_frame = len(out_dir_vec) - \
+                            int(end_padding_duration /
+                                data_params['audio_sr'] * self.s2eg_config_args.motion_resampling_framerate)
+                        end_frame = start_frame + n_smooth * 2
+                        if len(out_dir_vec) < end_frame:
+                            out_dir_vec = np.pad(out_dir_vec, [(0, end_frame - len(out_dir_vec)), (0, 0)],
+                                                 mode='constant')
+                        out_dir_vec[end_frame - n_smooth:] = \
+                            np.zeros(self.pose_dim)  # fade out to mean poses
+
+                        # interpolation
+                        y_trimodal = out_dir_vec_trimodal[start_frame:end_frame]
+                        y = out_dir_vec[start_frame:end_frame]
+                        x = np.array(range(0, y.shape[0]))
+                        w = np.ones(len(y))
+                        w[0] = 5
+                        w[-1] = 5
+
+                        co_effs_trimodal = np.polyfit(x, y_trimodal, 2, w=w)
+                        fit_functions_trimodal = [np.poly1d(co_effs_trimodal[:, k])
+                                                  for k in range(0, y_trimodal.shape[1])]
+                        interpolated_y_trimodal = [fit_functions_trimodal[k](x)
+                                                   for k in range(0, y_trimodal.shape[1])]
+                        # (num_frames x dims)
+                        interpolated_y_trimodal = np.transpose(np.asarray(interpolated_y_trimodal))
+
+                        co_effs = np.polyfit(x, y, 2, w=w)
+                        fit_functions = [np.poly1d(co_effs[:, k]) for k in range(0, y.shape[1])]
+                        interpolated_y = [fit_functions[k](x) for k in range(0, y.shape[1])]
+                        # (num_frames x dims)
+                        interpolated_y = np.transpose(np.asarray(interpolated_y))
+
+                        out_dir_vec_trimodal[start_frame:end_frame] = interpolated_y_trimodal
+                        out_dir_vec[start_frame:end_frame] = interpolated_y
+
+                    # make a video
+                    if make_video:
+                        sentence_words = []
+                        for word, _, _ in clip_words:
+                            sentence_words.append(word)
+                        sentence = ' '.join(sentence_words)
+
+                        filename_prefix = '{}_{}_{}'.format(vid_name, vid_idx, clip_idx)
+                        filename_prefix_for_video = filename_prefix
+                        aux_str = '({}, time: {}-{})'.format(vid_name,
+                                                             str(datetime.timedelta(seconds=clip_time[0])),
+                                                             str(datetime.timedelta(seconds=clip_time[1])))
+                        create_video_and_save(
+                            self.args.video_save_path, 0, filename_prefix_for_video, 0, target_dir_vec,
+                            out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
+                            audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
+                            delete_audio_file=False)
+                        print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.
+                              format(sample_idx + 1, samples_to_generate, time.time() - start_time))
+
+                    # save pkl
+                    if save_pkl:
+                        out_dir_vec_trimodal = out_dir_vec_trimodal + mean_dir_vec
+                        out_poses_trimodal = convert_dir_vec_to_pose(out_dir_vec_trimodal)
+
+                        save_dict = {
+                            'sentence': sentence, 'audio': clip_audio.astype(np.float32),
+                            'out_dir_vec': out_dir_vec_trimodal, 'out_poses': out_poses_trimodal,
+                            'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
+                            'human_dir_vec': target_dir_vec + mean_dir_vec,
+                        }
+                        with open(jn(self.args.video_save_path,
+                                     '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
+                            pickle.dump(save_dict, f)
+
+                        out_dir_vec = out_dir_vec + mean_dir_vec
+                        out_poses = convert_dir_vec_to_pose(out_dir_vec)
+
+                        save_dict = {
+                            'sentence': sentence, 'audio': clip_audio.astype(np.float32),
+                            'out_dir_vec': out_dir_vec, 'out_poses': out_poses,
+                            'aux_info': '{}_{}_{}'.format(vid_name, vid_idx, clip_idx),
+                            'human_dir_vec': target_dir_vec + mean_dir_vec,
+                        }
+                        with open(jn(self.args.video_save_path,
+                                     '{}.pkl'.format(filename_prefix)), 'wb') as f:
+                            pickle.dump(save_dict, f)
+
+            # print metrics
+            loss_dict = {'loss': losses_all.avg, 'joint_mae': joint_mae.avg}
+            elapsed_time = time.time() - start_time
+            if self.evaluator_trimodal and self.evaluator_trimodal.get_no_of_samples() > 0:
+                frechet_dist_trimodal, feat_dist_trimodal = self.evaluator_trimodal.get_scores()
+                print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+                      'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
+                                                                     joint_mae_trimodal.avg,
+                                                                     accel_trimodal.avg,
+                                                                     frechet_dist_trimodal,
+                                                                     feat_dist_trimodal,
+                                                                     elapsed_time))
+                loss_dict['frechet_trimodal'] = frechet_dist_trimodal
+                loss_dict['feat_dist_trimodal'] = feat_dist_trimodal
+            else:
+                print('[VAL Trimodal]\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all_trimodal.avg,
+                                                                                         joint_mae_trimodal.avg,
+                                                                                         elapsed_time))
 
         if self.evaluator and self.evaluator.get_no_of_samples() > 0:
             frechet_dist, feat_dist = self.evaluator.get_scores()

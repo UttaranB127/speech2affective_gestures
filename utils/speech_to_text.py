@@ -24,7 +24,7 @@ def change_speed(audio, speed=1.0):
 
 # a function that splits the audio file into chunks
 # and applies speech recognition
-def silence_based_conversion(_audio_file, _text_file, min_silence_len, silence_dbf_thresh, audio_speed=1.0):
+def silence_based_conversion(_audio_file, _text_file, chunk_dir, min_silence_len, silence_dbf_thresh, audio_speed=1.0):
     # open the audio file stored in
     # the local system as a wav file.
     audio = AudioSegment.from_wav(_audio_file)
@@ -42,13 +42,6 @@ def silence_based_conversion(_audio_file, _text_file, min_silence_len, silence_d
                               # adjust this per requirement
                               silence_thresh=silence_dbf_thresh
                               )
-
-    # move into the directory to
-    # store the audio files.
-    chunk_dir = 'audio_chunks'
-
-    # create a directory to store the audio chunks.
-    os.makedirs(chunk_dir, exist_ok=True)
 
     # process each chunk
     num_chunks = len(chunks)
@@ -100,11 +93,11 @@ def silence_based_conversion(_audio_file, _text_file, min_silence_len, silence_d
         except sr.RequestError:
             print('Error! Could not request results. check your internet connection')
 
-    shutil.rmtree(chunk_dir)
-
 
 speakers = ['almaram', 'angelica', 'chemistry', 'conan', 'ellen', 'jon', 'oliver', 'rock', 'seth', 'shelly']
 base_dir = '/media/uttaran/repo1/s2g_ginosar/data'
+tmp_dir = '/media/uttaran/repo1/s2g_ginosar/data/tmp'
+os.makedirs(tmp_dir, exist_ok=True)
 for speaker in speakers:
     audio_dir = os.path.join(base_dir, speaker, 'train/audio')
     text_dir = os.path.join(base_dir, speaker, 'train/text')
@@ -116,6 +109,7 @@ for speaker in speakers:
         print('Speaker: {}. Audio_file: {:>6}/{:>6}: {}.'.format(speaker, file_idx + 1, num_audio_files, file_base))
         text_file = os.path.join(text_dir, file_base + '.txt')
         if not os.path.exists(text_file):
-            silence_based_conversion(audio_file, text_file,
+            silence_based_conversion(audio_file, text_file, chunk_dir=tmp_dir,
                                      min_silence_len=1000, silence_dbf_thresh=-32, audio_speed=0.84)
         print()
+shutil.rmtree(tmp_dir)

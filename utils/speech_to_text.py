@@ -1,6 +1,7 @@
 # importing libraries
 import glob
 import os
+import pydub
 import shutil
 
 import speech_recognition as sr
@@ -27,74 +28,79 @@ def change_speed(audio, speed=1.0):
 def silence_based_conversion(_audio_file, _text_file, chunk_dir, min_silence_len, silence_dbf_thresh, audio_speed=1.0):
     # open the audio file stored in
     # the local system as a wav file.
-    audio = AudioSegment.from_wav(_audio_file)
+    try:
+        audio = AudioSegment.from_wav(_audio_file)
 
-    # split track where silence is 0.5 seconds
-    # or more and get chunks
-    chunks = split_on_silence(audio,
-                              # must be silent for at least 0.5 seconds
-                              # or 500 ms. adjust this value based on user
-                              # requirement. if the speaker stays silent for
-                              # longer, increase this value. else, decrease it.
-                              min_silence_len=min_silence_len,
+        # split track where silence is 0.5 seconds
+        # or more and get chunks
+        chunks = split_on_silence(audio,
+                                  # must be silent for at least 0.5 seconds
+                                  # or 500 ms. adjust this value based on user
+                                  # requirement. if the speaker stays silent for
+                                  # longer, increase this value. else, decrease it.
+                                  min_silence_len=min_silence_len,
 
-                              # consider it silent if quieter than -16 dBFS
-                              # adjust this per requirement
-                              silence_thresh=silence_dbf_thresh
-                              )
+                                  # consider it silent if quieter than -16 dBFS
+                                  # adjust this per requirement
+                                  silence_thresh=silence_dbf_thresh
+                                  )
 
-    # process each chunk
-    num_chunks = len(chunks)
-    for chunk_idx, chunk in enumerate(chunks):
+        # process each chunk
+        num_chunks = len(chunks)
+        for chunk_idx, chunk in enumerate(chunks):
 
-        # Create silence chunk
-        chunk_silent = AudioSegment.silent(duration=min_silence_len)
+            # Create silence chunk
+            chunk_silent = AudioSegment.silent(duration=min_silence_len)
 
-        # add silence to beginning and
-        # end of audio chunk. This is done so that
-        # it doesn't seem abruptly sliced.
-        audio_chunk = chunk_silent + chunk + chunk_silent
+            # add silence to beginning and
+            # end of audio chunk. This is done so that
+            # it doesn't seem abruptly sliced.
+            audio_chunk = chunk_silent + chunk + chunk_silent
 
-        audio_chunk = change_speed(audio_chunk, speed=audio_speed)
+            audio_chunk = change_speed(audio_chunk, speed=audio_speed)
 
-        # the name of the chunk file
-        chunk_file = os.path.join(chunk_dir, 'chunk_{:03d}'.format(chunk_idx) + '.wav')
+            # the name of the chunk file
+            chunk_file = os.path.join(chunk_dir, 'chunk_{:03d}'.format(chunk_idx) + '.wav')
 
-        # export audio chunk and save it in
-        # the current directory.
-        # specify the bitrate to be 192 k
-        audio_chunk.export(chunk_file, bitrate='192k', format='wav')
+            # export audio chunk and save it in
+            # the current directory.
+            # specify the bitrate to be 192 k
+            audio_chunk.export(chunk_file, bitrate='192k', format='wav')
 
-        # create a speech recognition object
-        r = sr.Recognizer()
+            # create a speech recognition object
+            r = sr.Recognizer()
 
-        # recognize the chunk
-        with sr.AudioFile(chunk_file) as source:
-            # remove this if it is not working
-            # correctly.
-            r.adjust_for_ambient_noise(source)
-            audio_listened = r.listen(source)
+            # recognize the chunk
+            with sr.AudioFile(chunk_file) as source:
+                # remove this if it is not working
+                # correctly.
+                r.adjust_for_ambient_noise(source)
+                audio_listened = r.listen(source)
 
-        print('\ttext from chunk {:>6}/{:>6}:\t'.format(chunk_idx, num_chunks - 1), end='')
-        try:
-            # try converting it to text
-            rec = r.recognize_google(audio_listened)
+            print('\ttext from chunk {:>6}/{:>6}:\t'.format(chunk_idx, num_chunks - 1), end='')
+            try:
+                # try converting it to text
+                rec = r.recognize_google(audio_listened)
 
-            # open a file where we will concatenate
-            # and store the recognized text
-            with open(_text_file, 'w+') as tf:
-                tf.write(rec + ' ')
-            print('{}'.format(rec))
+                # open a file where we will concatenate
+                # and store the recognized text
+                with open(_text_file, 'w+') as tf:
+                    tf.write(rec + ' ')
+                print('{}'.format(rec))
 
-        # catch any errors.
-        except sr.UnknownValueError:
-            print('Error! Could not understand audio')
+            # catch any errors.
+            except sr.UnknownValueError:
+                print('Error! Could not understand audio')
 
-        except sr.RequestError:
-            print('Error! Could not request results. check your internet connection')
+            except sr.RequestError:
+                print('Error! Could not request results. check your internet connection')
+
+    except pydub.exceptions.CouldntDecodeError:
+        print('Error! Could not find data header in wav data')
 
 
-speakers = ['almaram', 'angelica', 'chemistry', 'conan', 'ellen', 'jon', 'oliver', 'rock', 'seth', 'shelly']
+# speakers = ['almaram', 'angelica', 'chemistry', 'conan', 'ellen', 'jon', 'oliver', 'rock', 'seth', 'shelly']
+speakers = ['shelly']
 base_dir = '/media/uttaran/repo1/s2g_ginosar/data'
 tmp_dir = '/media/uttaran/repo1/s2g_ginosar/data/tmp'
 os.makedirs(tmp_dir, exist_ok=True)

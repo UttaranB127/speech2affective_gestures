@@ -1440,16 +1440,16 @@ class Processor(object):
                                                                                          joint_mae_trimodal.avg,
                                                                                          elapsed_time))
 
-        if self.evaluator and self.evaluator.get_no_of_samples() > 0:
-            frechet_dist, feat_dist = self.evaluator.get_scores()
-            print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
-                  'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg, accel.avg,
-                                                                 frechet_dist, feat_dist, elapsed_time))
-            loss_dict['frechet'] = frechet_dist
-            loss_dict['feat_dist'] = feat_dist
-        else:
-            print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg,
-                                                                                   joint_mae.avg,
-                                                                                   elapsed_time))
+            if self.evaluator and self.evaluator.get_no_of_samples() > 0:
+                frechet_dist, feat_dist = self.evaluator.get_scores()
+                print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.5f}, accel diff: {:.5f},'
+                      'FGD: {:.3f}, feat_D: {:.3f} / {:.1f}s'.format(losses_all.avg, joint_mae.avg, accel.avg,
+                                                                     frechet_dist, feat_dist, elapsed_time))
+                loss_dict['frechet'] = frechet_dist
+                loss_dict['feat_dist'] = feat_dist
+            else:
+                print('[VAL Ours]\t\tloss: {:.3f}, joint mae: {:.3f} / {:.1f}s'.format(losses_all.avg,
+                                                                                       joint_mae.avg,
+                                                                                       elapsed_time))
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - overall_start_time))

@@ -540,10 +540,10 @@ class PoseGenerator(nn.Module):
 
         output, decoder_hidden = self.gru(in_data, decoder_hidden)
         output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:]  # sum bidirectional outputs
-        output = self.out(output.reshape(-1, output.shape[2]))
-        decoder_outputs = output.reshape(in_data.shape[0], in_data.shape[1], -1)
+        decoder_outputs = self.out(output.reshape(-1, output.shape[2]))
+        decoder_outputs_reshaped = decoder_outputs.reshape(in_data.shape[0], in_data.shape[1], -1)
 
-        return decoder_outputs, z_context, z_mu, z_log_var
+        return decoder_outputs_reshaped, z_context, z_mu, z_log_var
 
 
 class AffDiscriminator(nn.Module):

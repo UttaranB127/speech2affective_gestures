@@ -37,7 +37,7 @@ def str2bool(v):
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
 parser.add_argument('--dataset-s2eg', type=str, default='ted_db', metavar='D-S2G',
                     help='dataset to train and evaluate speech to emotive gestures (default: ted_db)')
-parser.add_argument('--dataset-test', type=str, default='s2g', metavar='D-TST',
+parser.add_argument('--dataset-test', type=str, default='ted_db', metavar='D-TST',
                     help='dataset to test emotive gestures (default: ted_db)')
 parser.add_argument('-dap', '--dataset-s2eg-already-processed',
                     help='Optional. Set to True if dataset has already been processed.' +

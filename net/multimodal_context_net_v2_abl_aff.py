@@ -91,150 +91,195 @@ class TextEncoderTCN(nn.Module):
         return y.contiguous(), 0
 
 
-class AffEncoder(nn.Module):
-    def __init__(self, coords=3):
+class PoseGeneratorTriModal(nn.Module):
+    def __init__(self, args, pose_dim, n_words, word_embed_size, word_embeddings, z_obj=None):
         super().__init__()
-        self.coords = coords
+        self.pre_length = args.n_pre_poses
+        self.gen_length = args.n_poses - args.n_pre_poses
+        self.z_obj = z_obj
+        self.input_context = args.input_context
 
-        graph1 = Graph(len(ted_db.dir_edge_pairs) + 1,
-                       ted_db.dir_edge_pairs,
-                       strategy='spatial',
-                       max_hop=2)
-        self.A1 = torch.tensor(graph1.A,
-                               dtype=torch.float32,
-                               requires_grad=False).cuda()
+        if self.input_context == 'both':
+            self.in_size = 32 + 32 + pose_dim + 1  # audio_feat + text_feat + last pose + constraint bit
+        elif self.input_context == 'none':
+            self.in_size = pose_dim + 1
+        else:
+            self.in_size = 32 + pose_dim + 1  # audio or text only
 
-        self.num_body_parts = len(ted_db.body_parts_edge_idx)
-        graph2 = Graph(len(ted_db.body_parts_edge_pairs) + 1,
-                       ted_db.body_parts_edge_pairs,
-                       strategy='spatial',
-                       max_hop=2)
-        self.A2 = torch.tensor(graph2.A,
-                               dtype=torch.float32,
-                               requires_grad=False).cuda()
+        self.audio_encoder = WavEncoder()
+        self.text_encoder = TextEncoderTCN(args, n_words, word_embed_size, pre_trained_embedding=word_embeddings,
+                                           dropout=args.dropout_prob)
 
-        spatial_kernel_size1 = 5
-        temporal_kernel_size1 = 9
-        kernel_size1 = (temporal_kernel_size1, spatial_kernel_size1)
-        padding1 = ((kernel_size1[0] - 1) // 2, (kernel_size1[1] - 1) // 2)
-        self.st_gcn1 = STGraphConv(coords, 16, self.A1.size(0), kernel_size1,
-                                   stride=(1, 1), padding=padding1)
+        self.speaker_embedding = None
+        if self.z_obj:
+            self.z_size = 16
+            self.in_size += self.z_size
+            if self.z_obj.__class__.__name__ == 'Vocab':
+                self.speaker_embedding = nn.Sequential(
+                    nn.Embedding(z_obj.n_words, self.z_size),
+                    nn.Linear(self.z_size, self.z_size)
+                )
+                self.speaker_mu = nn.Linear(self.z_size, self.z_size)
+                self.speaker_log_var = nn.Linear(self.z_size, self.z_size)
+            else:
+                pass  # random noise
 
-        spatial_kernel_size2 = 3
-        temporal_kernel_size2 = 9
-        kernel_size2 = (temporal_kernel_size2, spatial_kernel_size2)
-        padding2 = ((kernel_size2[0] - 1) // 2, (kernel_size2[1] - 1) // 2)
-        self.st_gcn2 = STGraphConv(48, 16, self.A2.size(0), kernel_size2,
-                                   stride=(1, 1), padding=padding2)
-        # self.pre_conv = nn.Sequential(
-        #     nn.Conv1d(input_size, 16, 3),
-        #     nn.BatchNorm1d(16),
-        #     nn.LeakyReLU(True),
-        #     nn.Conv1d(16, 8, 3),
-        #     nn.BatchNorm1d(8),
-        #     nn.LeakyReLU(True),
-        #     nn.Conv1d(8, 8, 3),
-        # )
-        kernel_size3 = 5
-        padding3 = (kernel_size3 - 1) // 2
-        self.conv1 = nn.Conv1d(48, 16, kernel_size3, padding=padding3)
-        self.batch_norm1 = nn.BatchNorm1d(16)
+        self.hidden_size = args.hidden_size
+        self.gru = nn.GRU(self.in_size, hidden_size=self.hidden_size, num_layers=args.n_layers, batch_first=True,
+                          bidirectional=True, dropout=args.dropout_prob)
+        self.out = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size//2),
+            nn.LeakyReLU(True),
+            nn.Linear(self.hidden_size//2, pose_dim)
+        )
 
-        kernel_size4 = 3
-        padding4 = (kernel_size4 - 1) // 2
-        self.conv2 = nn.Conv1d(16, 8, kernel_size4, padding=padding4)
-        self.batch_norm2 = nn.BatchNorm1d(8)
+        self.do_flatten_parameters = False
+        if torch.cuda.device_count() > 1:
+            self.do_flatten_parameters = True
 
-        self.activation = nn.LeakyReLU(inplace=True)
+    def forward(self, pre_seq, in_text, in_audio, vid_indices=None):
+        decoder_hidden = None
+        if self.do_flatten_parameters:
+            self.gru.flatten_parameters()
 
-    def forward(self, poses):
-        n, t, jc = poses.shape
-        j = jc // self.coords
-        # poses = torch.cat((poses, torch.zeros_like(poses[..., 0:3])), dim=-1)
-        feat1_out, _ = self.st_gcn1(poses.view(n, t, -1, 3).permute(0, 3, 1, 2), self.A1)
-        f1 = feat1_out.shape[1]
-        feat2_in = torch.zeros((n, t,
-                                ted_db.max_body_part_edges * f1,
-                                self.num_body_parts)).float().cuda()
-        for idx, body_part_idx in enumerate(ted_db.body_parts_edge_idx):
-            feat2_in[..., :f1 * len(body_part_idx), idx] =\
-                feat1_out[..., body_part_idx].permute(0, 2, 1, 3).contiguous().view(n, t, -1)
-        feat2_in = feat2_in.permute(0, 2, 1, 3)
-        feat2_out, _ = self.st_gcn2(feat2_in, self.A2)
-        feat3_in = feat2_out.permute(0, 2, 1, 3).contiguous().view(n, t, -1).permute(0, 2, 1)
-        feat3_out = self.activation(self.batch_norm1(self.conv1(feat3_in)))
-        feat4_out = self.activation(self.batch_norm2(self.conv2(feat3_out))).permute(0, 2, 1)
+        text_feat_seq = audio_feat_seq = None
+        if self.input_context != 'none':
+            # audio
+            audio_feat_seq = self.audio_encoder(in_audio)  # output (bs, n_frames, feat_size)
 
-        return feat4_out
+            # text
+            text_feat_seq, _ = self.text_encoder(in_text)
+            assert(audio_feat_seq.shape[1] == text_feat_seq.shape[1])
+
+        # z vector; speaker embedding or random noise
+        if self.z_obj:
+            if self.speaker_embedding:
+                assert vid_indices is not None
+                z_context = self.speaker_embedding(vid_indices)
+                z_mu = self.speaker_mu(z_context)
+                z_log_var = self.speaker_log_var(z_context)
+                z_context = en.re_parametrize(z_mu, z_log_var)
+            else:
+                z_mu = z_log_var = None
+                z_context = torch.randn(in_text.shape[0], self.z_size, device=in_text.device)
+        else:
+            z_mu = z_log_var = None
+            z_context = None
+
+        if self.input_context == 'both':
+            in_data = torch.cat((pre_seq, audio_feat_seq, text_feat_seq), dim=2)
+        elif self.input_context == 'audio':
+            in_data = torch.cat((pre_seq, audio_feat_seq), dim=2)
+        elif self.input_context == 'text':
+            in_data = torch.cat((pre_seq, text_feat_seq), dim=2)
+        elif self.input_context == 'none':
+            in_data = pre_seq
+        else:
+            assert False
+
+        if z_context is not None:
+            repeated_z = z_context.unsqueeze(1)
+            repeated_z = repeated_z.repeat(1, in_data.shape[1], 1)
+            in_data = torch.cat((in_data, repeated_z), dim=2)
+
+        output, decoder_hidden = self.gru(in_data, decoder_hidden)
+        output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:]  # sum bidirectional outputs
+        output = self.out(output.reshape(-1, output.shape[2]))
+        decoder_outputs = output.reshape(in_data.shape[0], in_data.shape[1], -1)
+
+        return decoder_outputs, z_context, z_mu, z_log_var
 
 
-class AffDecoder(nn.Module):
-    def __init__(self, coords=3, num_joints=9):
+class DiscriminatorTriModal(nn.Module):
+    def __init__(self, args, input_size, n_words=None, word_embed_size=None, word_embeddings=None):
         super().__init__()
-        self.coords = coords
-        self.num_joints = num_joints
+        self.input_size = input_size
 
-        # kernel_size1 = 3
-        # padding1 = (kernel_size1 - 1) // 2
-        # self.conv1 = nn.ConvTranspose1d(8, 16, kernel_size1, padding=padding1)
-        # self.batch_norm1 = nn.BatchNorm1d(16)
-        #
-        # kernel_size2 = 5
-        # padding2 = (kernel_size2 - 1) // 2
-        # self.conv2 = nn.ConvTranspose1d(16, 48, kernel_size2, padding=padding2)
-        # self.batch_norm2 = nn.BatchNorm1d(48)
+        if n_words and word_embed_size:
+            self.text_encoder = TextEncoderTCN(n_words, word_embed_size, word_embeddings)
+            input_size += 32
+        else:
+            self.text_encoder = None
 
-        self.num_body_parts = len(ted_db.body_parts_edge_idx)
-        graph1 = Graph(len(ted_db.body_parts_edge_pairs) + 1,
-                       ted_db.body_parts_edge_pairs,
-                       strategy='spatial',
-                       max_hop=2)
-        self.A1 = torch.tensor(graph1.A,
-                               dtype=torch.float32,
-                               requires_grad=False).cuda()
+        self.hidden_size = args.hidden_size
+        self.gru = nn.GRU(input_size, hidden_size=self.hidden_size, num_layers=args.n_layers, bidirectional=True,
+                          dropout=args.dropout_prob, batch_first=True)
+        self.out = nn.Linear(self.hidden_size, 1)
+        self.out2 = nn.Linear(args.n_poses, 1)
 
-        graph2 = Graph(len(ted_db.dir_edge_pairs) + 1,
-                       ted_db.dir_edge_pairs,
-                       strategy='spatial',
-                       max_hop=2)
-        self.A2 = torch.tensor(graph2.A,
-                               dtype=torch.float32,
-                               requires_grad=False).cuda()
+        self.do_flatten_parameters = False
+        if torch.cuda.device_count() > 1:
+            self.do_flatten_parameters = True
 
-        spatial_kernel_size1 = 3
-        temporal_kernel_size1 = 9
-        kernel_size1 = (temporal_kernel_size1, spatial_kernel_size1)
-        padding1 = ((kernel_size1[0] - 1) // 2, (kernel_size1[1] - 1) // 2)
-        self.st_gcn1 = STGraphConvTranspose(16, 48, self.A1.size(0), kernel_size1,
-                                            stride=(1, 1), padding=padding1)
+    def forward(self, poses, in_text=None):
+        decoder_hidden = None
+        if self.do_flatten_parameters:
+            self.gru.flatten_parameters()
 
-        spatial_kernel_size2 = 5
-        temporal_kernel_size2 = 9
-        kernel_size2 = (temporal_kernel_size2, spatial_kernel_size2)
-        padding2 = ((kernel_size2[0] - 1) // 2, (kernel_size2[1] - 1) // 2)
-        self.st_gcn2 = STGraphConvTranspose(16, self.coords, self.A2.size(0), kernel_size2,
-                                            stride=(1, 1), padding=padding2)
+        if self.text_encoder:
+            text_feat_seq, _ = self.text_encoder(in_text)
+            poses = torch.cat((poses, text_feat_seq), dim=2)
 
-        self.activation = nn.LeakyReLU(inplace=True)
+        output, decoder_hidden = self.gru(poses, decoder_hidden)
+        output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:]  # sum bidirectional outputs
 
-    def forward(self, pose_feats):
-        n, t, f = pose_feats.shape
+        # use the last N outputs
+        batch_size = poses.shape[0]
+        output = output.contiguous().view(-1, output.shape[2])
+        output = self.out(output)  # apply linear to every output
+        output = output.view(batch_size, -1)
+        output = self.out2(output)
+        output = torch.sigmoid(output)
 
-        # feat1_out = self.activation(self.batch_norm1(self.conv1(pose_feats.permute(0, 2, 1))))
-        # feat2_out = self.activation(self.batch_norm2(self.conv2(feat1_out)))
-        # feat3_in = feat2_out.permute(0, 2, 1).contiguous().view(n, t, self.num_body_parts, -1).permute(0, 3, 1, 2)
+        return output
 
-        # feat3_in = pose_feats.contiguous().view(n, t, self.num_body_parts, -1).permute(0, 3, 1, 2)
-        # feat3_out, _ = self.st_gcn1(feat3_in, self.A1)
-        # feat4_out, _ = self.st_gcn2(feat3_out.permute(0, 2, 1, 3).contiguous().
-        #                             view(n, t, -1, self.num_joints).permute(0, 2, 1, 3),
-        #                             self.A2)
 
-        feat4_in = pose_feats.contiguous().view(n, t, self.num_joints, -1).permute(0, 3, 1, 2)
-        feat4_out, _ = self.st_gcn2(feat4_in,
-                                    self.A2)
+class ConvDiscriminatorTriModal(nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.input_size = input_size
 
-        return feat4_out.permute(0, 2, 3, 1).contiguous().view(n, t, -1)
+        self.hidden_size = 64
+        self.pre_conv = nn.Sequential(
+            nn.Conv1d(input_size, 16, 3),
+            nn.BatchNorm1d(16),
+            nn.LeakyReLU(True),
+            nn.Conv1d(16, 8, 3),
+            nn.BatchNorm1d(8),
+            nn.LeakyReLU(True),
+            nn.Conv1d(8, 8, 3),
+        )
+
+        self.gru = nn.GRU(8, hidden_size=self.hidden_size, num_layers=4, bidirectional=True,
+                          dropout=0.3, batch_first=True)
+        self.out = nn.Linear(self.hidden_size, 1)
+        self.out2 = nn.Linear(28, 1)
+
+        self.do_flatten_parameters = False
+        if torch.cuda.device_count() > 1:
+            self.do_flatten_parameters = True
+
+    def forward(self, poses, in_text=None):
+        decoder_hidden = None
+        if self.do_flatten_parameters:
+            self.gru.flatten_parameters()
+
+        poses = poses.transpose(1, 2)
+        feat = self.pre_conv(poses)
+        feat = feat.transpose(1, 2)
+
+        output, decoder_hidden = self.gru(feat, decoder_hidden)
+        output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:]  # sum bidirectional outputs
+
+        # use the last N outputs
+        batch_size = poses.shape[0]
+        output = output.contiguous().view(-1, output.shape[2])
+        output = self.out(output)  # apply linear to every output
+        output = output.view(batch_size, -1)
+        output = self.out2(output)
+        output = torch.sigmoid(output)
+
+        return output
 
 
 class PoseGenerator(nn.Module):
@@ -247,7 +292,7 @@ class PoseGenerator(nn.Module):
         self.input_context = args.input_context
         self.mfcc_feature_length = 32
         self.text_feature_length = 32
-        self.pose_feature_length = 8
+        self.pose_feature_length = pose_dim + 1
 
         if self.input_context == 'both':
             # audio_feat + text_feat + last pose + constraint bit
@@ -262,7 +307,6 @@ class PoseGenerator(nn.Module):
         self.audio_encoder = MFCCEncoder(mfcc_length, num_mfcc, time_steps)
         self.text_encoder = TextEncoderTCN(args, n_words, word_embed_size, pre_trained_embedding=word_embeddings,
                                            dropout=args.dropout_prob)
-        self.aff_encoder = AffEncoder()
 
         self.speaker_embedding = None
         if self.z_obj:
@@ -281,7 +325,6 @@ class PoseGenerator(nn.Module):
         self.hidden_size = args.hidden_size_s2eg
         self.gru = nn.GRU(self.in_size, hidden_size=self.hidden_size, num_layers=args.n_layers, batch_first=True,
                           bidirectional=True, dropout=args.dropout_prob)
-        self.aff_decoder = AffDecoder()
         self.out = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size//2),
             nn.LeakyReLU(inplace=True),
@@ -324,14 +367,12 @@ class PoseGenerator(nn.Module):
             z_mu = z_log_var = None
             z_context = None
 
-        pre_feat_seq = self.aff_encoder(pre_seq[..., :-1])
         if self.input_context == 'both':
-            in_data = torch.cat((pre_feat_seq, audio_feat_seq, text_feat_seq), dim=2)
-            # in_data = torch.cat((pre_seq, audio_feat_seq, text_feat_seq), dim=2)
+            in_data = torch.cat((pre_seq, audio_feat_seq, text_feat_seq), dim=2)
         elif self.input_context == 'audio':
-            in_data = torch.cat((pre_feat_seq, audio_feat_seq), dim=2)
+            in_data = torch.cat((pre_seq, audio_feat_seq), dim=2)
         elif self.input_context == 'text':
-            in_data = torch.cat((pre_feat_seq, text_feat_seq), dim=2)
+            in_data = torch.cat((pre_seq, text_feat_seq), dim=2)
         elif self.input_context == 'none':
             in_data = pre_seq
         else:
@@ -344,11 +385,10 @@ class PoseGenerator(nn.Module):
 
         output, decoder_hidden = self.gru(in_data, decoder_hidden)
         output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:]  # sum bidirectional outputs
-        decoder_outputs = self.aff_decoder(output)
-        # output = self.out(output.reshape(-1, output.shape[2]))
-        # decoder_outputs = output.reshape(in_data.shape[0], in_data.shape[1], -1)
+        decoder_outputs = self.out(output.reshape(-1, output.shape[2]))
+        decoder_outputs_reshaped = decoder_outputs.reshape(in_data.shape[0], in_data.shape[1], -1)
 
-        return decoder_outputs, z_context, z_mu, z_log_var
+        return decoder_outputs_reshaped, z_context, z_mu, z_log_var
 
 
 class ConvDiscriminator(nn.Module):

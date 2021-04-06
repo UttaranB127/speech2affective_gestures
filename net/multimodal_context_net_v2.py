@@ -529,7 +529,7 @@ class PoseGenerator(nn.Module):
         elif self.input_context == 'text':
             in_data = torch.cat((pre_feat_seq, text_feat_seq), dim=2)
         elif self.input_context == 'none':
-            in_data = pre_seq
+            in_data = pre_feat_seq
         else:
             assert False
 

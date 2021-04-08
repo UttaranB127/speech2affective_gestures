@@ -1,6 +1,7 @@
 import datetime
 import glob
 import json
+import librosa
 import lmdb
 import math
 import matplotlib.pyplot as plt
@@ -17,7 +18,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from os.path import join as jn
-from scipy.io import wavfile
 from torchlight.torchlight.io import IO
 
 import utils.common as cmn
@@ -1087,9 +1087,9 @@ class Processor(object):
         start_time = time.time()
         mean_dir_vec = np.squeeze(np.array(self.s2eg_config_args.mean_dir_vec))
 
-        clip_poses = resample_pose_seq(clip_poses, clip_time[1] - clip_time[0],
-                                       self.s2eg_config_args.motion_resampling_framerate)
-        target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses)
+        clip_poses_resampled = resample_pose_seq(clip_poses, clip_time[1] - clip_time[0],
+                                                 self.s2eg_config_args.motion_resampling_framerate)
+        target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses_resampled)
         target_dir_vec = target_dir_vec.reshape(target_dir_vec.shape[0], -1)
         target_dir_vec -= mean_dir_vec
         n_frames_total = len(target_dir_vec)
@@ -1109,7 +1109,7 @@ class Processor(object):
         out_list_trimodal = []
         out_list = []
         n_frames = self.s2eg_config_args.n_poses
-        clip_length = len(clip_audio) / data_params['audio_sr']
+        clip_length = len(clip_audio) / sample_rate
         seed_seq = target_dir_vec[0:self.s2eg_config_args.n_pre_poses]
 
         # pre seq
@@ -1141,8 +1141,8 @@ class Processor(object):
             num_subdivisions = 1
         else:
             num_subdivisions = math.ceil((clip_length - unit_time) / stride_time)
-        spectrogram_sample_length = int(round(unit_time * data_params['audio_sr'] / 512))
-        audio_sample_length = int(unit_time * data_params['audio_sr'])
+        spectrogram_sample_length = int(round(unit_time * sample_rate / 512))
+        audio_sample_length = int(unit_time * sample_rate)
         end_padding_duration = 0
 
         # prepare speaker input
@@ -1332,11 +1332,13 @@ class Processor(object):
             print('Rendered {} of {} videos. Last one took {:.2f} seconds.'.
                   format(sample_idx + 1, samples_to_generate, time.time() - start_time))
 
+        out_dir_vec_trimodal = out_dir_vec_trimodal + mean_dir_vec
+        out_poses_trimodal = convert_dir_vec_to_pose(out_dir_vec_trimodal)
+        out_dir_vec = out_dir_vec + mean_dir_vec
+        out_poses = convert_dir_vec_to_pose(out_dir_vec)
+
         # save pkl
         if save_pkl:
-            out_dir_vec_trimodal = out_dir_vec_trimodal + mean_dir_vec
-            out_poses_trimodal = convert_dir_vec_to_pose(out_dir_vec_trimodal)
-
             save_dict = {
                 'sentence': sentence, 'audio': clip_audio.astype(np.float32),
                 'out_dir_vec': out_dir_vec_trimodal, 'out_poses': out_poses_trimodal,
@@ -1347,9 +1349,6 @@ class Processor(object):
                          '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
                 pickle.dump(save_dict, f)
 
-            out_dir_vec = out_dir_vec + mean_dir_vec
-            out_poses = convert_dir_vec_to_pose(out_dir_vec)
-
             save_dict = {
                 'sentence': sentence, 'audio': clip_audio.astype(np.float32),
                 'out_dir_vec': out_dir_vec, 'out_poses': out_poses,
@@ -1359,6 +1358,8 @@ class Processor(object):
             with open(jn(self.args.video_save_path,
                          '{}.pkl'.format(filename_prefix)), 'wb') as f:
                 pickle.dump(save_dict, f)
+
+        return clip_poses_resampled, out_poses_trimodal, out_poses
 
     def generate_gestures_by_dataset(self, dataset, data_params, check_duration=True,
                                      randomized=True, fade_out=False,
@@ -1409,11 +1410,13 @@ class Processor(object):
                     clip_audio = clips[clip_idx]['audio_raw']
                     clip_words = clips[clip_idx]['words']
                     clip_time = [clips[clip_idx]['start_time'], clips[clip_idx]['end_time']]
-                    self.render_clip(data_params, vid_name, sample_idx, samples_to_generate,
-                                     clip_poses, clip_audio, data_params['audio_sr'], clip_words, clip_time,
-                                     clip_idx=clip_idx, speaker_vid_idx=speaker_vid_idx,
-                                     check_duration=check_duration, fade_out=fade_out,
-                                     make_video=make_video, save_pkl=save_pkl)
+                    clip_poses_resampled, out_poses_trimodal, out_poses =\
+                        self.render_clip(data_params, vid_name, sample_idx,
+                                         samples_to_generate, clip_poses, clip_audio,
+                                         data_params['audio_sr'], clip_words, clip_time,
+                                         clip_idx=clip_idx, speaker_vid_idx=speaker_vid_idx,
+                                         check_duration=check_duration, fade_out=fade_out,
+                                         make_video=make_video, save_pkl=save_pkl)
 
         elif dataset.lower() == 'genea_challenge_2020':
             file_names = ['.wav'.join(f.split('.wav')[:-1]) for f in os.listdir(jn(data_params['data_path'], 'audio'))]
@@ -1423,7 +1426,8 @@ class Processor(object):
             print('Total samples to generate: {}'.format(samples_to_generate))
             joint_indices_to_keep = [0, 4, 6, 7, 9, 10, 11, 28, 29, 30]
             for f_idx, f in enumerate(file_names):
-                sample_rate, audio = wavfile.read(jn(data_params['data_path'], 'audio', f + '.wav'))
+                audio, sample_rate = librosa.load(jn(data_params['data_path'], 'audio', f + '.wav'),
+                                                  mono=True, sr=16000, res_type='kaiser_fast')
                 j_names, _, _, joint_positions, _, frame_rate =\
                     MoCapDataset.load_bvh(jn(data_params['data_path'], 'bvh_raw', f + '.bvh'))
                 joint_positions_max = np.power(10., np.ceil(np.log10(np.max(joint_positions))))
@@ -1448,13 +1452,13 @@ class Processor(object):
                 else:
                     speaker_vid_idx = 0
 
-                self.render_clip(data_params, f, f_idx, samples_to_generate,
-                                 joint_positions_scaled[:, joint_indices_to_keep],
-                                 audio / 32767., sample_rate, transcript, clip_time,
-                                 clip_idx=0, speaker_vid_idx=speaker_vid_idx,
-                                 check_duration=check_duration, fade_out=fade_out,
-                                 make_video=make_video, save_pkl=save_pkl)
+                clip_poses_resampled, out_poses_trimodal, out_poses =\
+                    self.render_clip(data_params, f, f_idx, samples_to_generate,
+                                     joint_positions_scaled[:, joint_indices_to_keep],
+                                     audio, sample_rate, transcript, clip_time,
+                                     clip_idx=0, speaker_vid_idx=speaker_vid_idx,
+                                     check_duration=check_duration, fade_out=fade_out,
+                                     make_video=make_video, save_pkl=save_pkl)
 
-            stop = 1
         end_time = time.time()
         print('Total time taken: {:.2f} seconds.'.format(end_time - overall_start_time))

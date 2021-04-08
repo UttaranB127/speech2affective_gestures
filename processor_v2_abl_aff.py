@@ -169,14 +169,15 @@ class Processor(object):
             if not os.path.exists(train_file_name):
                 self.save_cache('train', train_file_name)
             self.load_cache('train', train_file_name)
+            print('Total s2eg evaluation data:\t\t{:>6} ({:.2f}%)'.format(
+                self.num_eval_samples, 100. * self.num_eval_samples / self.num_total_samples))
+            eval_file_name = jn(npz_path, 'eval.npz')
+            if not os.path.exists(eval_file_name):
+                self.save_cache('eval', eval_file_name)
+            self.load_cache('eval', eval_file_name)
         else:
             self.train_samples = None
-        print('Total s2eg evaluation data:\t\t{:>6} ({:.2f}%)'.format(
-            self.num_eval_samples, 100. * self.num_eval_samples / self.num_total_samples))
-        eval_file_name = jn(npz_path, 'eval.npz')
-        if not os.path.exists(eval_file_name):
-            self.save_cache('eval', eval_file_name)
-        self.load_cache('eval', eval_file_name)
+            self.eval_samples = None
 
         print('Total s2eg testing data:\t\t{:>6} ({:.2f}%)'.format(
             self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))

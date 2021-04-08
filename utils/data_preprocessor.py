@@ -8,11 +8,11 @@ import numpy as np
 import pyarrow
 import tqdm
 
-from librosa.feature import mfcc
 from sklearn.preprocessing import normalize
 
 import utils.ted_db_utils as data_utils
 
+from utils.common import get_mfcc_features
 from utils.motion_preprocessor import MotionPreprocessor
 
 
@@ -137,13 +137,7 @@ class DataPreprocessor:
                 sample_audio = clip_audio_raw[audio_start:audio_end]
 
             # mfcc features
-            sample_mfcc = mfcc(sample_audio, sr=16000, n_mfcc=self.num_mfcc) / 1000.
-            # mfcc 1st differential
-            sample_mfcc_1d = sample_mfcc[2:] - sample_mfcc[1:-1]
-            # mfcc 2nd differential
-            sample_mfcc_2d = sample_mfcc_1d[1:] - sample_mfcc_1d[:-1]
-            # combine all
-            sample_mfcc_combined = np.concatenate((sample_mfcc, sample_mfcc_1d, sample_mfcc_2d), axis=0)
+            sample_mfcc_combined = get_mfcc_features(sample_audio, sr=16000, num_mfcc=self.num_mfcc)
 
             if len(sample_words) >= 2:
                 # filtering motion skeleton data

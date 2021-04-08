@@ -1,10 +1,21 @@
+import glob
+import joblib as jl
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import scipy.optimize as opt
+import sys
 import torch
 
+from librosa.feature import mfcc
 from mpl_toolkits.mplot3d import Axes3D
+from os.path import join as jn
+from utils.pymo.data import Joint, MocapData
+from utils.pymo.parsers import BVHParser
+from utils.pymo.preprocessing import *
+from utils.pymo.writers import *
 from sklearn.decomposition import PCA
+from sklearn.pipeline import Pipeline
 from torch.autograd import Variable
 # from utils.Quaternions import Quaternions
 
@@ -303,10 +314,10 @@ def get_transformation(X, Y):
 
 
 def fit_sin(tt, yy):
-    '''
+    """
     Fit sin to the input time sequence, and return fitting parameters
     "amp", "omega", "phase", "offset", "freq", "period" and "fitfunc"
-    '''
+    """
     tt = np.array(tt)
     yy = np.array(yy)
     ff = np.fft.fftfreq(len(tt), (tt[1] - tt[0]))  # assume uniform spacing
@@ -316,7 +327,7 @@ def fit_sin(tt, yy):
     guess_offset = np.mean(yy)
     guess = np.array([guess_amp, 2. * np.pi * guess_freq, 0., guess_offset])
 
-    def sinfunc(t, A, w, p, c):  return A * np.sin(w * t + p) + c
+    def sinfunc(t, A, w, p, c): return A * np.sin(w * t + p) + c
 
     popt, pcov = opt.curve_fit(sinfunc, tt, yy, p0=guess)
     A, w, p, c = popt
@@ -324,3 +335,15 @@ def fit_sin(tt, yy):
     fitfunc = lambda t: A * np.sin(w * t + p) + c
     return {"amp": A, "omega": w, "phase": p, "offset": c, "freq": f, "period": 1. / f, "fitfunc": fitfunc,
             "maxcov": np.max(pcov), "rawres": (guess, popt, pcov)}
+
+
+def get_mfcc_features(audio, sr, num_mfcc):
+    # mfcc features
+    mfcc_features = mfcc(audio, sr=sr, n_mfcc=num_mfcc) / 1000.
+    # mfcc 1st differential
+    mfcc_features_1d = mfcc_features[2:] - mfcc_features[1:-1]
+    # mfcc 2nd differential
+    mfcc_features_2d = mfcc_features_1d[1:] - mfcc_features_1d[:-1]
+    # combine all
+    mfcc_combined = np.concatenate((mfcc_features, mfcc_features_1d, mfcc_features_2d), axis=0)
+    return mfcc_combined

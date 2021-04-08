@@ -37,8 +37,8 @@ def str2bool(v):
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
 parser.add_argument('--dataset-s2eg', type=str, default='ted_db', metavar='D-S2G',
                     help='dataset to train and evaluate speech to emotive gestures (default: ted_db)')
-parser.add_argument('--dataset-test', type=str, default='ted_db', metavar='D-TST',
-                    help='dataset to test emotive gestures (default: ted_db)')
+parser.add_argument('--dataset-test', type=str, default='genea_challenge_2020', metavar='D-TST',
+                    help='dataset to test emotive gestures (options: ted_db, genea_challenge_2020)')
 parser.add_argument('-dap', '--dataset-s2eg-already-processed',
                     help='Optional. Set to True if dataset has already been processed.' +
                          'If not, or if you are not sure, set it to False.',
@@ -111,7 +111,7 @@ s2eg_config_args = parse_args()
 args.work_dir_s2eg = j(models_s2eg_path, args.dataset_s2eg)
 os.makedirs(args.work_dir_s2eg, exist_ok=True)
 
-args.video_save_path = j(base_path, 'outputs', 'videos_trimodal_style')
+args.video_save_path = j(base_path, 'outputs', args.dataset_test, 'videos_trimodal_style')
 os.makedirs(args.video_save_path, exist_ok=True)
 args.quantitative_save_path = j(base_path, 'outputs', 'quantitative')
 os.makedirs(args.quantitative_save_path, exist_ok=True)
@@ -131,9 +131,16 @@ if args.train_s2eg:
 # pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
 #                      randomized=randomized, s2eg_epoch=310, make_video=False)
 
-pr.generate_gestures_by_dataset(dataset=args.dataset_test,
-                                data_params={'env_file': j(data_path, 'ted_db/lmdb_test'),
-                                             'clip_duration_range': [5, 30],
-                                             'audio_sr': 16000},
-                                randomized=randomized, s2eg_epoch=290,
-                                make_video=True, save_pkl=True)
+data_params = {}
+check_duration = False
+if args.dataset_test.lower() == 'ted_db':
+    data_params = {'env_file': j(data_path, 'ted_db/lmdb_test'),
+                   'clip_duration_range': [5, 30],
+                   'audio_sr': 16000}
+    check_duration = True
+elif args.dataset_test.lower() == 'genea_challenge_2020':
+    data_params = {'data_path': '/media/uttaran/repo1/genea_challenge_2020/test'}
+
+pr.generate_gestures_by_dataset(dataset=args.dataset_test, data_params=data_params,
+                                randomized=randomized, check_duration=check_duration,
+                                s2eg_epoch=290, make_video=True, save_pkl=True)

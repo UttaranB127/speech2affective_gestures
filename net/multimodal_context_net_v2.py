@@ -476,7 +476,7 @@ class PoseGenerator(nn.Module):
             else:
                 pass  # random noise
 
-        self.hidden_size = args.hidden_size_s2eg
+        self.hidden_size = args.hidden_size_s2ag
         self.gru = nn.GRU(self.in_size, hidden_size=self.hidden_size, num_layers=args.n_layers, batch_first=True,
                           bidirectional=True, dropout=args.dropout_prob)
         self.out = nn.Sequential(

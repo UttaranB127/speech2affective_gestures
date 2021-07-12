@@ -452,7 +452,7 @@ class TedDBParams:
         self.lang_model = None
 
         print('Reading data \'{}\'...'.format(lmdb_dir))
-        preloaded_dir = lmdb_dir + '_s2eg_v2_cache_mfcc_{}'.format(self.num_mfcc)
+        preloaded_dir = lmdb_dir + '_s2ag_v2_cache_mfcc_{}'.format(self.num_mfcc)
         if not os.path.exists(preloaded_dir):
             print('Creating the dataset cache...')
             assert mean_dir_vec is not None
@@ -472,7 +472,7 @@ class TedDBParams:
 
         # make a speaker model
         if speaker_model is None or speaker_model == 0:
-            precomputed_model = lmdb_dir + '_s2eg_speaker_model.pkl'
+            precomputed_model = lmdb_dir + '_s2ag_speaker_model.pkl'
             if not os.path.exists(precomputed_model):
                 self._make_speaker_model(lmdb_dir, precomputed_model)
             else:
@@ -582,7 +582,7 @@ def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
 
     # build vocab
     vocab_cache_path = j(os.path.split(config_args.train_data_path[0])[0],
-                         'vocab_models_s2eg',
+                         'vocab_models_s2ag',
                          'vocab_cache.pkl')
     lang_model = build_vocab('words', [train_dataset, eval_dataset, test_dataset],
                              vocab_cache_path, config_args.wordembed_path,

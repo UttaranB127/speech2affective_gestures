@@ -86,20 +86,20 @@ class Processor(object):
         Processor for emotive gesture generation
     """
 
-    def __init__(self, args, s2eg_config_args, data_loader, pose_dim, coords,
+    def __init__(self, args, s2ag_config_args, data_loader, pose_dim, coords,
                  audio_sr, min_train_epochs=20, zfill=6):
         self.device = torch.device('cuda:{}'.format(torch.cuda.current_device())
                                    if torch.cuda.is_available() else 'cpu')
 
         self.args = args
-        self.s2eg_config_args = s2eg_config_args
+        self.s2ag_config_args = s2ag_config_args
         self.data_loader = data_loader
         self.result = dict()
         self.iter_info = dict()
         self.epoch_info = dict()
         self.meta_info = dict(epoch=0, iter=0)
         self.io = IO(
-            self.args.work_dir_s2eg,
+            self.args.work_dir_s2ag,
             save_log=self.args.save_log,
             print_log=self.args.print_log)
 
@@ -108,80 +108,80 @@ class Processor(object):
         self.coords = coords
         self.audio_sr = audio_sr
 
-        self.time_steps = self.data_loader['train_data_s2eg'].n_poses
-        self.audio_length = self.data_loader['train_data_s2eg'].expected_audio_length
-        self.spectrogram_length = self.data_loader['train_data_s2eg'].expected_spectrogram_length
+        self.time_steps = self.data_loader['train_data_s2ag'].n_poses
+        self.audio_length = self.data_loader['train_data_s2ag'].expected_audio_length
+        self.spectrogram_length = self.data_loader['train_data_s2ag'].expected_spectrogram_length
         self.mfcc_length = int(np.ceil(self.audio_length / 512))
-        self.num_mfcc = self.data_loader['train_data_s2eg'].num_mfcc_combined
+        self.num_mfcc = self.data_loader['train_data_s2ag'].num_mfcc_combined
 
-        self.best_s2eg_loss = np.inf
-        self.best_s2eg_loss_epoch = None
-        self.s2eg_loss_updated = False
+        self.best_s2ag_loss = np.inf
+        self.best_s2ag_loss_epoch = None
+        self.s2ag_loss_updated = False
         self.min_train_epochs = min_train_epochs
         self.zfill = zfill
-        self.lang_model = self.data_loader['train_data_s2eg'].lang_model
-        self.train_speaker_model = self.data_loader['train_data_s2eg'].speaker_model
-        self.eval_speaker_model = self.data_loader['eval_data_s2eg'].speaker_model
-        self.test_speaker_model = self.data_loader['test_data_s2eg'].speaker_model
-        self.trimodal_generator = PGT(self.s2eg_config_args,
+        self.lang_model = self.data_loader['train_data_s2ag'].lang_model
+        self.train_speaker_model = self.data_loader['train_data_s2ag'].speaker_model
+        self.eval_speaker_model = self.data_loader['eval_data_s2ag'].speaker_model
+        self.test_speaker_model = self.data_loader['test_data_s2ag'].speaker_model
+        self.trimodal_generator = PGT(self.s2ag_config_args,
                                       pose_dim=self.pose_dim,
                                       n_words=self.lang_model.n_words,
-                                      word_embed_size=self.s2eg_config_args.wordembed_dim,
+                                      word_embed_size=self.s2ag_config_args.wordembed_dim,
                                       word_embeddings=self.lang_model.word_embedding_weights,
                                       z_obj=self.train_speaker_model)
         self.trimodal_discriminator = CDT(self.pose_dim)
         self.use_mfcc = True
         if self.use_mfcc:
-            self.s2eg_generator = PoseGenerator(self.s2eg_config_args,
+            self.s2ag_generator = PoseGenerator(self.s2ag_config_args,
                                                 pose_dim=self.pose_dim,
                                                 n_words=self.lang_model.n_words,
-                                                word_embed_size=self.s2eg_config_args.wordembed_dim,
+                                                word_embed_size=self.s2ag_config_args.wordembed_dim,
                                                 word_embeddings=self.lang_model.word_embedding_weights,
                                                 mfcc_length=self.mfcc_length,
                                                 num_mfcc=self.num_mfcc,
                                                 time_steps=self.time_steps,
                                                 z_obj=self.train_speaker_model)
         else:
-            self.s2eg_generator = PGT(self.s2eg_config_args,
+            self.s2ag_generator = PGT(self.s2ag_config_args,
                                       pose_dim=self.pose_dim,
                                       n_words=self.lang_model.n_words,
-                                      word_embed_size=self.s2eg_config_args.wordembed_dim,
+                                      word_embed_size=self.s2ag_config_args.wordembed_dim,
                                       word_embeddings=self.lang_model.word_embedding_weights,
                                       z_obj=self.train_speaker_model)
-        # self.s2eg_discriminator = CDT(self.pose_dim)
-        self.s2eg_discriminator = AffDiscriminator(self.pose_dim)
-        self.evaluator_trimodal = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,
+        # self.s2ag_discriminator = CDT(self.pose_dim)
+        self.s2ag_discriminator = AffDiscriminator(self.pose_dim)
+        self.evaluator_trimodal = EmbeddingSpaceEvaluator(self.s2ag_config_args, self.pose_dim,
                                                           self.lang_model, self.device)
-        self.evaluator = EmbeddingSpaceEvaluator(self.s2eg_config_args, self.pose_dim,
+        self.evaluator = EmbeddingSpaceEvaluator(self.s2ag_config_args, self.pose_dim,
                                                  self.lang_model, self.device)
 
         if self.args.use_multiple_gpus and torch.cuda.device_count() > 1:
             self.args.batch_size *= torch.cuda.device_count()
             self.trimodal_generator = nn.DataParallel(self.trimodal_generator)
             self.trimodal_discriminator = nn.DataParallel(self.trimodal_discriminator)
-            self.s2eg_generator = nn.DataParallel(self.s2eg_generator)
-            self.s2eg_discriminator = nn.DataParallel(self.s2eg_discriminator)
+            self.s2ag_generator = nn.DataParallel(self.s2ag_generator)
+            self.s2ag_discriminator = nn.DataParallel(self.s2ag_discriminator)
         else:
             self.trimodal_generator.to(self.device)
             self.trimodal_discriminator.to(self.device)
-            self.s2eg_generator.to(self.device)
-            self.s2eg_discriminator.to(self.device)
+            self.s2ag_generator.to(self.device)
+            self.s2ag_discriminator.to(self.device)
 
-        self.num_train_samples = self.data_loader['train_data_s2eg'].n_samples
-        self.num_eval_samples = self.data_loader['eval_data_s2eg'].n_samples
-        self.num_test_samples = self.data_loader['test_data_s2eg'].n_samples
+        self.num_train_samples = self.data_loader['train_data_s2ag'].n_samples
+        self.num_eval_samples = self.data_loader['eval_data_s2ag'].n_samples
+        self.num_test_samples = self.data_loader['test_data_s2ag'].n_samples
         self.num_total_samples = self.num_train_samples + self.num_eval_samples + self.num_test_samples
-        npz_path = jn(self.args.data_path, self.args.dataset_s2eg, 'npz')
+        npz_path = jn(self.args.data_path, self.args.dataset_s2ag, 'npz')
         os.makedirs(npz_path, exist_ok=True)
-        if self.args.train_s2eg:
-            print('Total s2eg training data:\t\t{:>6} ({:.2f}%)'.format(
+        if self.args.train_s2ag:
+            print('Total s2ag training data:\t\t{:>6} ({:.2f}%)'.format(
                 self.num_train_samples, 100. * self.num_train_samples / self.num_total_samples))
-            print('Training s2eg with batch size:\t{:>6}'.format(self.args.batch_size))
+            print('Training s2ag with batch size:\t{:>6}'.format(self.args.batch_size))
             train_file_name = jn(npz_path, 'train.npz')
             if not os.path.exists(train_file_name):
                 self.save_cache('train', train_file_name)
             self.load_cache('train', train_file_name)
-            print('Total s2eg evaluation data:\t\t{:>6} ({:.2f}%)'.format(
+            print('Total s2ag evaluation data:\t\t{:>6} ({:.2f}%)'.format(
                 self.num_eval_samples, 100. * self.num_eval_samples / self.num_total_samples))
             eval_file_name = jn(npz_path, 'eval.npz')
             if not os.path.exists(eval_file_name):
@@ -191,21 +191,21 @@ class Processor(object):
             self.train_samples = None
             self.eval_samples = None
 
-        print('Total s2eg testing data:\t\t{:>6} ({:.2f}%)'.format(
+        print('Total s2ag testing data:\t\t{:>6} ({:.2f}%)'.format(
             self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))
         test_file_name = jn(npz_path, 'test.npz')
         if not os.path.exists(test_file_name):
             self.save_cache('test', test_file_name)
 
-        self.lr_s2eg_gen = self.s2eg_config_args.learning_rate
-        self.lr_s2eg_dis = self.s2eg_config_args.learning_rate * self.s2eg_config_args.discriminator_lr_weight
+        self.lr_s2ag_gen = self.s2ag_config_args.learning_rate
+        self.lr_s2ag_dis = self.s2ag_config_args.learning_rate * self.s2ag_config_args.discriminator_lr_weight
 
-        # s2eg optimizers
-        self.s2eg_gen_optimizer = optim.Adam(self.s2eg_generator.parameters(),
-                                             lr=self.lr_s2eg_gen, betas=(0.5, 0.999))
-        self.s2eg_dis_optimizer = torch.optim.Adam(
-            self.s2eg_discriminator.parameters(),
-            lr=self.lr_s2eg_dis,
+        # s2ag optimizers
+        self.s2ag_gen_optimizer = optim.Adam(self.s2ag_generator.parameters(),
+                                             lr=self.lr_s2ag_gen, betas=(0.5, 0.999))
+        self.s2ag_dis_optimizer = torch.optim.Adam(
+            self.s2ag_discriminator.parameters(),
+            lr=self.lr_s2ag_dis,
             betas=(0.5, 0.999))
 
     def load_cache(self, part, file_name):
@@ -228,7 +228,7 @@ class Processor(object):
         print(' took {:>6} seconds.'.format(int(np.ceil(time.time() - start_time))))
 
     def save_cache(self, part, file_name):
-        data_s2eg = self.data_loader['{}_data_s2eg'.format(part)]
+        data_s2ag = self.data_loader['{}_data_s2ag'.format(part)]
         num_samples = self.num_train_samples if part == 'train' else\
             (self.num_eval_samples if part == 'eval' else self.num_test_samples)
 
@@ -240,7 +240,7 @@ class Processor(object):
         # vid_indices_all = np.zeros(num_samples, dtype=np.int64)
         print('Caching {} data {:>6}/{}.'.format(part, 0, num_samples), end='')
         for k in range(num_samples):
-            with data_s2eg.lmdb_env.begin(write=False) as txn:
+            with data_s2ag.lmdb_env.begin(write=False) as txn:
                 key = '{:010}'.format(k).encode('ascii')
                 sample = txn.get(key)
                 sample = pyarrow.deserialize(sample)
@@ -251,17 +251,17 @@ class Processor(object):
             do_clipping = True
 
             if do_clipping:
-                sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
+                sample_end_time = aux_info['start_time'] + duration * data_s2ag.n_poses / vec_seq.shape[0]
                 audio = make_audio_fixed_length(audio, self.audio_length)
                 mfcc_features = mfcc_features[:, 0:self.mfcc_length]
-                vec_seq = vec_seq[0:data_s2eg.n_poses]
+                vec_seq = vec_seq[0:data_s2ag.n_poses]
             else:
                 sample_end_time = None
 
             # to tensors
-            word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-            extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
-                                                          data_s2eg.remove_word_timing, word_seq,
+            word_seq_tensor = Processor.words_to_tensor(data_s2ag.lang_model, word_seq, sample_end_time)
+            extended_word_seq = Processor.extend_word_seq(data_s2ag.n_poses, data_s2ag.lang_model,
+                                                          data_s2ag.remove_word_timing, word_seq,
                                                           aux_info, sample_end_time).detach().cpu().numpy()
             vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float().detach().cpu().numpy()
 
@@ -288,13 +288,13 @@ class Processor(object):
         return data, poses, quat, trans, affs
 
     def load_model_at_epoch(self, epoch='best'):
-        model_name, self.best_s2eg_loss_epoch, self.best_s2eg_loss = \
-            get_epoch_and_loss(self.args.work_dir_s2eg, epoch=epoch)
+        model_name, self.best_s2ag_loss_epoch, self.best_s2ag_loss = \
+            get_epoch_and_loss(self.args.work_dir_s2ag, epoch=epoch)
         model_found = False
         try:
-            loaded_vars = torch.load(jn(self.args.work_dir_s2eg, model_name))
-            self.s2eg_generator.load_state_dict(loaded_vars['gen_model_dict'])
-            self.s2eg_discriminator.load_state_dict(loaded_vars['dis_model_dict'])
+            loaded_vars = torch.load(jn(self.args.work_dir_s2ag, model_name))
+            self.s2ag_generator.load_state_dict(loaded_vars['gen_model_dict'])
+            self.s2ag_discriminator.load_state_dict(loaded_vars['dis_model_dict'])
             model_found = True
         except (FileNotFoundError, IsADirectoryError):
             if epoch == 'best':
@@ -303,20 +303,20 @@ class Processor(object):
                 print('Warning! No saved model found at epoch {}.'.format(epoch))
         return model_found
 
-    def adjust_lr_s2eg(self):
-        self.lr_s2eg_gen = self.lr_s2eg_gen * self.args.lr_s2eg_decay
-        for param_group in self.s2eg_gen_optimizer.param_groups:
-            param_group['lr'] = self.lr_s2eg_gen
+    def adjust_lr_s2ag(self):
+        self.lr_s2ag_gen = self.lr_s2ag_gen * self.args.lr_s2ag_decay
+        for param_group in self.s2ag_gen_optimizer.param_groups:
+            param_group['lr'] = self.lr_s2ag_gen
 
-        self.lr_s2eg_dis = self.lr_s2eg_dis * self.args.lr_s2eg_decay
-        for param_group in self.s2eg_dis_optimizer.param_groups:
-            param_group['lr'] = self.lr_s2eg_dis
+        self.lr_s2ag_dis = self.lr_s2ag_dis * self.args.lr_s2ag_decay
+        for param_group in self.s2ag_dis_optimizer.param_groups:
+            param_group['lr'] = self.lr_s2ag_dis
 
     def show_epoch_info(self):
 
-        best_metrics = [self.best_s2eg_loss]
-        print_epochs = [self.best_s2eg_loss_epoch
-                        if self.best_s2eg_loss_epoch is not None else 0] * len(best_metrics)
+        best_metrics = [self.best_s2ag_loss]
+        print_epochs = [self.best_s2ag_loss_epoch
+                        if self.best_s2ag_loss_epoch is not None else 0] * len(best_metrics)
         i = 0
         for k, v in self.epoch_info.items():
             self.io.print_log('\t{}: {}. Best so far: {:.4f} (epoch: {:d}).'.
@@ -341,7 +341,7 @@ class Processor(object):
                 self.io.log('train', self.meta_info['iter'], self.iter_info)
 
     def count_parameters(self):
-        return sum(p.numel() for p in self.s2eg_generator.parameters() if p.requires_grad)
+        return sum(p.numel() for p in self.s2ag_generator.parameters() if p.requires_grad)
 
     @staticmethod
     def extend_word_seq(n_frames, lang, remove_word_timing, words, aux_info, end_time=None):
@@ -395,10 +395,10 @@ class Processor(object):
         batch_vid_indices = torch.zeros(self.args.batch_size).long().to(self.device)
 
         if train:
-            data_s2eg = self.data_loader['train_data_s2eg']
+            data_s2ag = self.data_loader['train_data_s2ag']
             num_data = self.num_train_samples
         else:
-            data_s2eg = self.data_loader['eval_data_s2eg']
+            data_s2ag = self.data_loader['eval_data_s2ag']
             num_data = self.num_eval_samples
 
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
@@ -418,19 +418,19 @@ class Processor(object):
         #     do_clipping = True
         #
         #     if do_clipping:
-        #         sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
+        #         sample_end_time = aux_info['start_time'] + duration * data_s2ag.n_poses / vec_seq.shape[0]
         #         audio = make_audio_fixed_length(audio, self.audio_length)
         #         spectrogram = spectrogram[:, 0:self.spectrogram_length]
         #         mfcc_features = mfcc_features[:, 0:self.mfcc_length]
-        #         vec_seq = vec_seq[0:data_s2eg.n_poses]
-        #         pose_seq = pose_seq[0:data_s2eg.n_poses]
+        #         vec_seq = vec_seq[0:data_s2ag.n_poses]
+        #         pose_seq = pose_seq[0:data_s2ag.n_poses]
         #     else:
         #         sample_end_time = None
         #
         #     # to tensors
-        #     word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-        #     extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
-        #                                                   data_s2eg.remove_word_timing, word_seq,
+        #     word_seq_tensor = Processor.words_to_tensor(data_s2ag.lang_model, word_seq, sample_end_time)
+        #     extended_word_seq = Processor.extend_word_seq(data_s2ag.n_poses, data_s2ag.lang_model,
+        #                                                   data_s2ag.remove_word_timing, word_seq,
         #                                                   aux_info, sample_end_time)
         #     vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
         #     pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
@@ -479,18 +479,18 @@ class Processor(object):
                 do_clipping = True
 
                 if do_clipping:
-                    sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
+                    sample_end_time = aux_info['start_time'] + duration * data_s2ag.n_poses / vec_seq.shape[0]
                     audio = make_audio_fixed_length(audio, self.audio_length)
                     mfcc_features = mfcc_features[:, 0:self.mfcc_length]
-                    vec_seq = vec_seq[0:data_s2eg.n_poses]
-                    pose_seq = pose_seq[0:data_s2eg.n_poses]
+                    vec_seq = vec_seq[0:data_s2ag.n_poses]
+                    pose_seq = pose_seq[0:data_s2ag.n_poses]
                 else:
                     sample_end_time = None
 
                 # to tensors
-                word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-                extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
-                                                              data_s2eg.remove_word_timing, word_seq,
+                word_seq_tensor = Processor.words_to_tensor(data_s2ag.lang_model, word_seq, sample_end_time)
+                extended_word_seq = Processor.extend_word_seq(data_s2ag.n_poses, data_s2ag.lang_model,
+                                                              data_s2ag.remove_word_timing, word_seq,
                                                               aux_info, sample_end_time)
                 vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
                 pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
@@ -515,7 +515,7 @@ class Processor(object):
                         batch_vid_indices[i] = \
                             torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
 
-            # with data_s2eg.lmdb_env.begin(write=False) as txn:
+            # with data_s2ag.lmdb_env.begin(write=False) as txn:
             #     threads = []
             #     for i, k in enumerate(rand_keys):
             #         threads.append(threading.Thread(target=load_from_txn, args=[i, k]))
@@ -527,10 +527,10 @@ class Processor(object):
 
     def yield_batch(self, train):
         if train:
-            data_s2eg = self.data_loader['train_data_s2eg']
+            data_s2ag = self.data_loader['train_data_s2ag']
             num_data = self.num_train_samples
         else:
-            data_s2eg = self.data_loader['eval_data_s2eg']
+            data_s2ag = self.data_loader['eval_data_s2ag']
             num_data = self.num_eval_samples
 
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
@@ -578,7 +578,7 @@ class Processor(object):
 
     def return_batch(self, batch_size, randomized=True):
 
-        data_s2eg = self.data_loader['test_data_s2eg']
+        data_s2ag = self.data_loader['test_data_s2ag']
 
         if len(batch_size) > 1:
             rand_keys = np.copy(batch_size)
@@ -608,7 +608,7 @@ class Processor(object):
 
         for i, k in enumerate(rand_keys):
 
-            with data_s2eg.lmdb_env.begin(write=False) as txn:
+            with data_s2ag.lmdb_env.begin(write=False) as txn:
                 key = '{:010}'.format(k).encode('ascii')
                 sample = txn.get(key)
                 sample = pyarrow.deserialize(sample)
@@ -624,25 +624,25 @@ class Processor(object):
                 do_clipping = True
 
                 if do_clipping:
-                    sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
+                    sample_end_time = aux_info['start_time'] + duration * data_s2ag.n_poses / vec_seq.shape[0]
                     audio = make_audio_fixed_length(audio, self.audio_length)
                     spectrogram = spectrogram[:, 0:self.spectrogram_length]
                     mfcc_features = mfcc_features[:, 0:self.mfcc_length]
-                    vec_seq = vec_seq[0:data_s2eg.n_poses]
-                    pose_seq = pose_seq[0:data_s2eg.n_poses]
+                    vec_seq = vec_seq[0:data_s2ag.n_poses]
+                    pose_seq = pose_seq[0:data_s2ag.n_poses]
                 else:
                     sample_end_time = None
 
                 # to tensors
-                word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-                extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
-                                                              data_s2eg.remove_word_timing, word_seq,
+                word_seq_tensor = Processor.words_to_tensor(data_s2ag.lang_model, word_seq, sample_end_time)
+                extended_word_seq = Processor.extend_word_seq(data_s2ag.n_poses, data_s2ag.lang_model,
+                                                              data_s2ag.remove_word_timing, word_seq,
                                                               aux_info, sample_end_time)
                 vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float()
                 pose_seq = torch.from_numpy(pose_seq).reshape((pose_seq.shape[0], -1)).float()
                 target_seq = convert_pose_seq_to_dir_vec(pose_seq)
                 target_seq = target_seq.reshape(target_seq.shape[0], -1)
-                target_seq -= np.reshape(self.s2eg_config_args.mean_dir_vec, -1)
+                target_seq -= np.reshape(self.s2ag_config_args.mean_dir_vec, -1)
                 mfcc_features = torch.from_numpy(mfcc_features)
                 audio = torch.from_numpy(audio).float()
                 spectrogram = torch.from_numpy(spectrogram)
@@ -712,56 +712,56 @@ class Processor(object):
 
         return evaluator, losses_all, joint_mae, accel
 
-    def forward_pass_s2eg(self, in_text, in_audio, in_mfcc, target_poses, vid_indices, train,
+    def forward_pass_s2ag(self, in_text, in_audio, in_mfcc, target_poses, vid_indices, train,
                           target_seq=None, words=None, aux_info=None, save_path=None, make_video=False,
                           calculate_metrics=False, losses_all_trimodal=None, joint_mae_trimodal=None,
                           accel_trimodal=None, losses_all=None, joint_mae=None, accel=None):
-        warm_up_epochs = self.s2eg_config_args.loss_warmup
+        warm_up_epochs = self.s2ag_config_args.loss_warmup
         use_noisy_target = False
 
         # make pre seq input
         pre_seq = target_poses.new_zeros((target_poses.shape[0], target_poses.shape[1],
                                           target_poses.shape[2] + 1))
-        pre_seq[:, 0:self.s2eg_config_args.n_pre_poses, :-1] =\
-            target_poses[:, 0:self.s2eg_config_args.n_pre_poses]
-        pre_seq[:, 0:self.s2eg_config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
+        pre_seq[:, 0:self.s2ag_config_args.n_pre_poses, :-1] =\
+            target_poses[:, 0:self.s2ag_config_args.n_pre_poses]
+        pre_seq[:, 0:self.s2ag_config_args.n_pre_poses, -1] = 1  # indicating bit for constraints
 
         ###########################################################################################
         # train D
         dis_error = None
-        if self.meta_info['epoch'] > warm_up_epochs and self.s2eg_config_args.loss_gan_weight > 0.0:
-            self.s2eg_dis_optimizer.zero_grad()
+        if self.meta_info['epoch'] > warm_up_epochs and self.s2ag_config_args.loss_gan_weight > 0.0:
+            self.s2ag_dis_optimizer.zero_grad()
 
             # out shape (batch x seq x dim)
             if self.use_mfcc:
-                out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+                out_dir_vec, *_ = self.s2ag_generator(pre_seq, in_text, in_mfcc, vid_indices)
             else:
-                out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
+                out_dir_vec, *_ = self.s2ag_generator(pre_seq, in_text, in_audio, vid_indices)
 
             if use_noisy_target:
                 noise_target = Processor.add_noise(target_poses)
                 noise_out = Processor.add_noise(out_dir_vec.detach())
-                dis_real = self.s2eg_discriminator(noise_target, in_text)
-                dis_fake = self.s2eg_discriminator(noise_out, in_text)
+                dis_real = self.s2ag_discriminator(noise_target, in_text)
+                dis_fake = self.s2ag_discriminator(noise_out, in_text)
             else:
-                dis_real = self.s2eg_discriminator(target_poses, in_text)
-                dis_fake = self.s2eg_discriminator(out_dir_vec.detach(), in_text)
+                dis_real = self.s2ag_discriminator(target_poses, in_text)
+                dis_fake = self.s2ag_discriminator(out_dir_vec.detach(), in_text)
 
             dis_error = torch.sum(-torch.mean(torch.log(dis_real + 1e-8) + torch.log(1 - dis_fake + 1e-8)))  # ns-gan
             if train:
                 dis_error.backward()
-                self.s2eg_dis_optimizer.step()
+                self.s2ag_dis_optimizer.step()
 
         ###########################################################################################
         # train G
-        self.s2eg_gen_optimizer.zero_grad()
+        self.s2ag_gen_optimizer.zero_grad()
 
         # decoding
         out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq, in_text, in_audio, vid_indices)
         if self.use_mfcc:
-            out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_mfcc, vid_indices)
+            out_dir_vec, z, z_mu, z_log_var = self.s2ag_generator(pre_seq, in_text, in_mfcc, vid_indices)
         else:
-            out_dir_vec, z, z_mu, z_log_var = self.s2eg_generator(pre_seq, in_text, in_audio, vid_indices)
+            out_dir_vec, z, z_mu, z_log_var = self.s2ag_generator(pre_seq, in_text, in_audio, vid_indices)
 
         # make a video
         assert not make_video or (make_video and target_seq is not None), \
@@ -792,7 +792,7 @@ class Processor(object):
                     save_path, 0, filename_prefix_for_video, 0,
                     target_seq[vid_idx].cpu().numpy(),
                     out_dir_vec_trimodal[vid_idx].cpu().numpy(), out_dir_vec[vid_idx].cpu().numpy(),
-                    np.reshape(self.s2eg_config_args.mean_dir_vec, -1), sentences[vid_idx],
+                    np.reshape(self.s2ag_config_args.mean_dir_vec, -1), sentences[vid_idx],
                     audio=in_audio[vid_idx].cpu().numpy(), aux_str=aux_str,
                     clipping_to_shortest_stream=True, delete_audio_file=False)
                 print('\rRendered {} of {} videos. Last one took {:.2f} seconds.'.format(vid_idx + 1,
@@ -820,24 +820,24 @@ class Processor(object):
             self.evaluator_trimodal, losses_all_trimodal, joint_mae_trimodal, accel_trimodal =\
                 Processor.push_samples(self.evaluator_trimodal, target_seq, out_dir_vec_trimodal,
                                        in_text, in_audio, losses_all_trimodal, joint_mae_trimodal, accel_trimodal,
-                                       self.s2eg_config_args.mean_dir_vec, self.s2eg_config_args.n_poses,
-                                       self.s2eg_config_args.n_pre_poses)
+                                       self.s2ag_config_args.mean_dir_vec, self.s2ag_config_args.n_poses,
+                                       self.s2ag_config_args.n_pre_poses)
             self.evaluator, losses_all, joint_mae, accel =\
                 Processor.push_samples(self.evaluator, target_seq, out_dir_vec,
                                        in_text, in_audio, losses_all, joint_mae, accel,
-                                       self.s2eg_config_args.mean_dir_vec, self.s2eg_config_args.n_poses,
-                                       self.s2eg_config_args.n_pre_poses)
+                                       self.s2ag_config_args.mean_dir_vec, self.s2ag_config_args.n_poses,
+                                       self.s2ag_config_args.n_pre_poses)
 
         # loss
         beta = 0.1
         huber_loss = F.smooth_l1_loss(out_dir_vec / beta, target_poses / beta) * beta
-        dis_output = self.s2eg_discriminator(out_dir_vec, in_text)
+        dis_output = self.s2ag_discriminator(out_dir_vec, in_text)
         gen_error = -torch.mean(torch.log(dis_output + 1e-8))
         kld = div_reg = None
 
-        if (self.s2eg_config_args.z_type == 'speaker' or self.s2eg_config_args.z_type == 'random') and \
-                self.s2eg_config_args.loss_reg_weight > 0.0:
-            if self.s2eg_config_args.z_type == 'speaker':
+        if (self.s2ag_config_args.z_type == 'speaker' or self.s2ag_config_args.z_type == 'random') and \
+                self.s2ag_config_args.loss_reg_weight > 0.0:
+            if self.s2ag_config_args.z_type == 'speaker':
                 # enforcing divergent gestures btw original vid and other vid
                 rand_idx = torch.randperm(vid_indices.shape[0])
                 rand_vids = vid_indices[rand_idx]
@@ -845,9 +845,9 @@ class Processor(object):
                 rand_vids = None
 
             if self.use_mfcc:
-                out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_mfcc, rand_vids)
+                out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2ag_generator(pre_seq, in_text, in_mfcc, rand_vids)
             else:
-                out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2eg_generator(pre_seq, in_text, in_audio, rand_vids)
+                out_dir_vec_rand_vid, z_rand_vid, _, _ = self.s2ag_generator(pre_seq, in_text, in_audio, rand_vids)
             beta = 0.05
             pose_l1 = F.smooth_l1_loss(out_dir_vec / beta, out_dir_vec_rand_vid.detach() / beta,
                                        reduction='none') * beta
@@ -860,33 +860,33 @@ class Processor(object):
             div_reg = torch.clamp(div_reg, min=-1000)
             div_reg = div_reg.mean()
 
-            if self.s2eg_config_args.z_type == 'speaker':
+            if self.s2ag_config_args.z_type == 'speaker':
                 # speaker embedding KLD
                 kld = -0.5 * torch.mean(1 + z_log_var - z_mu.pow(2) - z_log_var.exp())
-                loss = self.s2eg_config_args.loss_regression_weight * huber_loss + \
-                       self.s2eg_config_args.loss_kld_weight * kld + \
-                       self.s2eg_config_args.loss_reg_weight * div_reg
+                loss = self.s2ag_config_args.loss_regression_weight * huber_loss + \
+                       self.s2ag_config_args.loss_kld_weight * kld + \
+                       self.s2ag_config_args.loss_reg_weight * div_reg
             else:
-                loss = self.s2eg_config_args.loss_regression_weight * huber_loss + \
-                       self.s2eg_config_args.loss_reg_weight * div_reg
+                loss = self.s2ag_config_args.loss_regression_weight * huber_loss + \
+                       self.s2ag_config_args.loss_reg_weight * div_reg
         else:
-            loss = self.s2eg_config_args.loss_regression_weight * huber_loss  # + var_loss
+            loss = self.s2ag_config_args.loss_regression_weight * huber_loss  # + var_loss
 
         if self.meta_info['epoch'] > warm_up_epochs:
-            loss += self.s2eg_config_args.loss_gan_weight * gen_error
+            loss += self.s2ag_config_args.loss_gan_weight * gen_error
 
         if train:
             loss.backward()
-            self.s2eg_gen_optimizer.step()
+            self.s2ag_gen_optimizer.step()
 
-        loss_dict = {'loss': self.s2eg_config_args.loss_regression_weight * huber_loss.item()}
+        loss_dict = {'loss': self.s2ag_config_args.loss_regression_weight * huber_loss.item()}
         if kld:
-            loss_dict['KLD'] = self.s2eg_config_args.loss_kld_weight * kld.item()
+            loss_dict['KLD'] = self.s2ag_config_args.loss_kld_weight * kld.item()
         if div_reg:
-            loss_dict['DIV_REG'] = self.s2eg_config_args.loss_reg_weight * div_reg.item()
+            loss_dict['DIV_REG'] = self.s2ag_config_args.loss_reg_weight * div_reg.item()
 
-        if self.meta_info['epoch'] > warm_up_epochs and self.s2eg_config_args.loss_gan_weight > 0.0:
-            loss_dict['gen'] = self.s2eg_config_args.loss_gan_weight * gen_error.item()
+        if self.meta_info['epoch'] > warm_up_epochs and self.s2ag_config_args.loss_gan_weight > 0.0:
+            loss_dict['gen'] = self.s2ag_config_args.loss_gan_weight * gen_error.item()
             loss_dict['dis'] = dis_error.item()
         # total_loss = 0.
         # for loss in loss_dict.keys():
@@ -897,9 +897,9 @@ class Processor(object):
 
     def per_train_epoch(self):
 
-        self.s2eg_generator.train()
-        self.s2eg_discriminator.train()
-        batch_s2eg_loss = 0.
+        self.s2ag_generator.train()
+        self.s2ag_discriminator.train()
+        batch_s2ag_loss = 0.
         num_batches = self.num_train_samples // self.args.batch_size + 1
 
         start_time = time.time()
@@ -907,33 +907,33 @@ class Processor(object):
 
         for extended_word_seq, vec_seq, audio,\
                 mfcc_features, vid_indices in self.yield_batch(train=True):
-            loss, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
+            loss, *_ = self.forward_pass_s2ag(extended_word_seq, audio, mfcc_features,
                                               vec_seq, vid_indices, train=True)
             # Compute statistics
-            batch_s2eg_loss += loss
+            batch_s2ag_loss += loss
 
-            self.iter_info['s2eg_loss'] = loss
-            self.iter_info['lr_gen'] = '{}'.format(self.lr_s2eg_gen)
-            self.iter_info['lr_dis'] = '{}'.format(self.lr_s2eg_dis)
+            self.iter_info['s2ag_loss'] = loss
+            self.iter_info['lr_gen'] = '{}'.format(self.lr_s2ag_gen)
+            self.iter_info['lr_dis'] = '{}'.format(self.lr_s2ag_dis)
             self.show_iter_info()
 
             self.meta_info['iter'] += 1
             print('\riter {:>3}/{} took {:>4} seconds\t'.
                   format(self.meta_info['iter'], num_batches, int(np.ceil(time.time() - start_time))), end='')
 
-        batch_s2eg_loss /= num_batches
-        self.epoch_info['mean_s2eg_loss'] = batch_s2eg_loss
+        batch_s2ag_loss /= num_batches
+        self.epoch_info['mean_s2ag_loss'] = batch_s2ag_loss
 
         self.show_epoch_info()
         self.io.print_timer()
 
-        # self.adjust_lr_s2eg()
+        # self.adjust_lr_s2ag()
 
     def per_eval_epoch(self):
 
-        self.s2eg_generator.eval()
-        self.s2eg_discriminator.eval()
-        batch_s2eg_loss = 0.
+        self.s2ag_generator.eval()
+        self.s2ag_discriminator.eval()
+        batch_s2ag_loss = 0.
         num_batches = self.num_eval_samples // self.args.batch_size + 1
 
         start_time = time.time()
@@ -941,29 +941,29 @@ class Processor(object):
         for extended_word_seq, vec_seq, audio,\
                 mfcc_features, vid_indices in self.yield_batch(train=False):
             with torch.no_grad():
-                loss, *_ = self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
+                loss, *_ = self.forward_pass_s2ag(extended_word_seq, audio, mfcc_features,
                                                   vec_seq, vid_indices, train=False)
                 # Compute statistics
-                batch_s2eg_loss += loss
+                batch_s2ag_loss += loss
 
-                self.iter_info['s2eg_loss'] = loss
-                self.iter_info['lr_gen'] = '{:.6f}'.format(self.lr_s2eg_gen)
-                self.iter_info['lr_dis'] = '{:.6f}'.format(self.lr_s2eg_dis)
+                self.iter_info['s2ag_loss'] = loss
+                self.iter_info['lr_gen'] = '{:.6f}'.format(self.lr_s2ag_gen)
+                self.iter_info['lr_dis'] = '{:.6f}'.format(self.lr_s2ag_dis)
                 self.show_iter_info()
 
             self.meta_info['iter'] += 1
             print('\riter {:>3}/{} took {:>4} seconds\t'.
                   format(self.meta_info['iter'], num_batches, int(np.ceil(time.time() - start_time))), end='')
 
-        batch_s2eg_loss /= num_batches
-        self.epoch_info['mean_s2eg_loss'] = batch_s2eg_loss
-        if self.epoch_info['mean_s2eg_loss'] < self.best_s2eg_loss and \
+        batch_s2ag_loss /= num_batches
+        self.epoch_info['mean_s2ag_loss'] = batch_s2ag_loss
+        if self.epoch_info['mean_s2ag_loss'] < self.best_s2ag_loss and \
                 self.meta_info['epoch'] > self.min_train_epochs:
-            self.best_s2eg_loss = self.epoch_info['mean_s2eg_loss']
-            self.best_s2eg_loss_epoch = self.meta_info['epoch']
-            self.s2eg_loss_updated = True
+            self.best_s2ag_loss = self.epoch_info['mean_s2ag_loss']
+            self.best_s2ag_loss_epoch = self.meta_info['epoch']
+            self.s2ag_loss_updated = True
         else:
-            self.s2eg_loss_updated = False
+            self.s2ag_loss_updated = False
 
         self.show_epoch_info()
         self.io.print_timer()
@@ -972,53 +972,53 @@ class Processor(object):
         trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
         self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
-        if self.args.s2eg_load_last_best:
-            s2eg_model_found = self.load_model_at_epoch(epoch=self.args.s2eg_start_epoch)
-            if not s2eg_model_found and self.args.s2eg_start_epoch is not 'best':
-                print('Warning! Trying to load best known model for s2eg: '.format(self.args.s2eg_start_epoch),
+        if self.args.s2ag_load_last_best:
+            s2ag_model_found = self.load_model_at_epoch(epoch=self.args.s2ag_start_epoch)
+            if not s2ag_model_found and self.args.s2ag_start_epoch is not 'best':
+                print('Warning! Trying to load best known model for s2ag: '.format(self.args.s2ag_start_epoch),
                       end='')
-                s2eg_model_found = self.load_model_at_epoch(epoch='best')
-                self.args.s2eg_start_epoch = self.best_s2eg_loss_epoch if s2eg_model_found else 0
+                s2ag_model_found = self.load_model_at_epoch(epoch='best')
+                self.args.s2ag_start_epoch = self.best_s2ag_loss_epoch if s2ag_model_found else 0
                 print('loaded.')
-                if not s2eg_model_found:
+                if not s2ag_model_found:
                     print('Warning! Starting at epoch 0')
-                    self.args.s2eg_start_epoch = 0
+                    self.args.s2ag_start_epoch = 0
         else:
-            self.args.s2eg_start_epoch = 0
-        for epoch in range(self.args.s2eg_start_epoch, self.args.s2eg_num_epoch):
+            self.args.s2ag_start_epoch = 0
+        for epoch in range(self.args.s2ag_start_epoch, self.args.s2ag_num_epoch):
             self.meta_info['epoch'] = epoch
 
             # training
-            self.io.print_log('S2EG training epoch: {}'.format(epoch))
+            self.io.print_log('s2ag training epoch: {}'.format(epoch))
             self.per_train_epoch()
             self.io.print_log('Done.')
 
             # evaluation
             if (epoch % self.args.eval_interval == 0) or (
                     epoch + 1 == self.args.num_epoch):
-                self.io.print_log('S2EG eval epoch: {}'.format(epoch))
+                self.io.print_log('s2ag eval epoch: {}'.format(epoch))
                 self.per_eval_epoch()
                 self.io.print_log('Done.')
 
             # save model and weights
-            if self.s2eg_loss_updated or (epoch % self.args.save_interval == 0 and epoch > self.min_train_epochs):
-                torch.save({'gen_model_dict': self.s2eg_generator.state_dict(),
-                            'dis_model_dict': self.s2eg_discriminator.state_dict()},
-                           jn(self.args.work_dir_s2eg, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
-                              format(epoch, self.epoch_info['mean_s2eg_loss'])))
+            if self.s2ag_loss_updated or (epoch % self.args.save_interval == 0 and epoch > self.min_train_epochs):
+                torch.save({'gen_model_dict': self.s2ag_generator.state_dict(),
+                            'dis_model_dict': self.s2ag_discriminator.state_dict()},
+                           jn(self.args.work_dir_s2ag, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
+                              format(epoch, self.epoch_info['mean_s2ag_loss'])))
 
     def generate_gestures(self, samples_to_generate=10, randomized=True, load_saved_model=True,
-                          s2eg_epoch='best', make_video=False, calculate_metrics=True):
+                          s2ag_epoch='best', make_video=False, calculate_metrics=True):
 
         if load_saved_model:
-            s2eg_model_found = self.load_model_at_epoch(epoch=s2eg_epoch)
-            assert s2eg_model_found, print('Speech to emotive gestures model not found')
+            s2ag_model_found = self.load_model_at_epoch(epoch=s2ag_epoch)
+            assert s2ag_model_found, print('Speech to emotive gestures model not found')
             trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
         self.trimodal_generator.eval()
-        self.s2eg_generator.eval()
-        self.s2eg_discriminator.eval()
+        self.s2ag_generator.eval()
+        self.s2ag_discriminator.eval()
         batch_size = 2048
 
         losses_all_trimodal = AverageMeter('loss')
@@ -1038,7 +1038,7 @@ class Processor(object):
             with torch.no_grad():
                 loss_dict, losses_all_trimodal, joint_mae_trimodal,\
                     accel_trimodal, losses_all, joint_mae, accel = \
-                    self.forward_pass_s2eg(extended_word_seq, audio, mfcc_features,
+                    self.forward_pass_s2ag(extended_word_seq, audio, mfcc_features,
                                            vec_seq, vid_indices, train=False,
                                            target_seq=target_seq, words=words, aux_info=aux_info,
                                            save_path=self.args.video_save_path,
@@ -1085,10 +1085,10 @@ class Processor(object):
                     clip_idx=0, speaker_vid_idx=0, check_duration=True,
                     fade_out=False, make_video=False, save_pkl=False):
         start_time = time.time()
-        mean_dir_vec = np.squeeze(np.array(self.s2eg_config_args.mean_dir_vec))
+        mean_dir_vec = np.squeeze(np.array(self.s2ag_config_args.mean_dir_vec))
 
         clip_poses_resampled = resample_pose_seq(clip_poses, clip_time[1] - clip_time[0],
-                                                 self.s2eg_config_args.motion_resampling_framerate)
+                                                 self.s2ag_config_args.motion_resampling_framerate)
         target_dir_vec = convert_pose_seq_to_dir_vec(clip_poses_resampled)
         target_dir_vec = target_dir_vec.reshape(target_dir_vec.shape[0], -1)
         target_dir_vec -= mean_dir_vec
@@ -1108,24 +1108,24 @@ class Processor(object):
 
         out_list_trimodal = []
         out_list = []
-        n_frames = self.s2eg_config_args.n_poses
+        n_frames = self.s2ag_config_args.n_poses
         clip_length = len(clip_audio) / sample_rate
-        seed_seq = target_dir_vec[0:self.s2eg_config_args.n_pre_poses]
+        seed_seq = target_dir_vec[0:self.s2ag_config_args.n_pre_poses]
 
         # pre seq
         pre_seq_trimodal = torch.zeros((1, n_frames, self.pose_dim + 1))
         if seed_seq is not None:
-            pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
+            pre_seq_trimodal[0, 0:self.s2ag_config_args.n_pre_poses, :-1] = \
+                torch.Tensor(seed_seq[0:self.s2ag_config_args.n_pre_poses])
             # indicating bit for seed poses
-            pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
+            pre_seq_trimodal[0, 0:self.s2ag_config_args.n_pre_poses, -1] = 1
 
         pre_seq = torch.zeros((1, n_frames, self.pose_dim + 1))
         if seed_seq is not None:
-            pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                torch.Tensor(seed_seq[0:self.s2eg_config_args.n_pre_poses])
+            pre_seq[0, 0:self.s2ag_config_args.n_pre_poses, :-1] = \
+                torch.Tensor(seed_seq[0:self.s2ag_config_args.n_pre_poses])
             # indicating bit for seed poses
-            pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
+            pre_seq[0, 0:self.s2ag_config_args.n_pre_poses, -1] = 1
 
         # target seq
         target_seq = torch.from_numpy(target_dir_vec[0:n_frames]).unsqueeze(0).float().to(self.device)
@@ -1133,10 +1133,10 @@ class Processor(object):
         spectrogram = None
 
         # divide into synthesize units and do synthesize
-        unit_time = self.s2eg_config_args.n_poses / \
-            self.s2eg_config_args.motion_resampling_framerate
-        stride_time = (self.s2eg_config_args.n_poses - self.s2eg_config_args.n_pre_poses) / \
-            self.s2eg_config_args.motion_resampling_framerate
+        unit_time = self.s2ag_config_args.n_poses / \
+            self.s2ag_config_args.motion_resampling_framerate
+        stride_time = (self.s2ag_config_args.n_poses - self.s2ag_config_args.n_pre_poses) / \
+            self.s2ag_config_args.motion_resampling_framerate
         if clip_length < unit_time:
             num_subdivisions = 1
         else:
@@ -1146,9 +1146,9 @@ class Processor(object):
         end_padding_duration = 0
 
         # prepare speaker input
-        if self.s2eg_config_args.z_type == 'speaker':
+        if self.s2ag_config_args.z_type == 'speaker':
             if speaker_vid_idx is None:
-                speaker_vid_idx = np.random.randint(0, self.s2eg_generator.z_obj.n_words)
+                speaker_vid_idx = np.random.randint(0, self.s2ag_generator.z_obj.n_words)
             print('vid idx:', speaker_vid_idx)
             speaker_vid_idx = torch.LongTensor([speaker_vid_idx]).to(self.device)
         else:
@@ -1180,7 +1180,7 @@ class Processor(object):
                                      'constant')
             in_mfcc = torch.from_numpy(
                 cmn.get_mfcc_features(in_audio_np, sr=sample_rate,
-                                      num_mfcc=self.data_loader['train_data_s2eg'].num_mfcc)). \
+                                      num_mfcc=self.data_loader['train_data_s2ag'].num_mfcc)). \
                 unsqueeze(0).to(self.device).float()
             in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
 
@@ -1211,31 +1211,31 @@ class Processor(object):
                     target_dir_vec[start_idx:end_idx]) \
                     .unsqueeze(0).float().to(self.device)
 
-                pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                    out_dir_vec_trimodal.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
+                pre_seq_trimodal[0, 0:self.s2ag_config_args.n_pre_poses, :-1] = \
+                    out_dir_vec_trimodal.squeeze(0)[-self.s2ag_config_args.n_pre_poses:]
                 # indicating bit for constraints
-                pre_seq_trimodal[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
+                pre_seq_trimodal[0, 0:self.s2ag_config_args.n_pre_poses, -1] = 1
 
-                pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, :-1] = \
-                    out_dir_vec.squeeze(0)[-self.s2eg_config_args.n_pre_poses:]
+                pre_seq[0, 0:self.s2ag_config_args.n_pre_poses, :-1] = \
+                    out_dir_vec.squeeze(0)[-self.s2ag_config_args.n_pre_poses:]
                 # indicating bit for constraints
-                pre_seq[0, 0:self.s2eg_config_args.n_pre_poses, -1] = 1
+                pre_seq[0, 0:self.s2ag_config_args.n_pre_poses, -1] = 1
 
             pre_seq_trimodal = pre_seq_trimodal.float().to(self.device)
             pre_seq = pre_seq.float().to(self.device)
 
             out_dir_vec_trimodal, *_ = self.trimodal_generator(pre_seq_trimodal,
                                                                in_text_padded, in_audio, speaker_vid_idx)
-            out_dir_vec, *_ = self.s2eg_generator(pre_seq, in_text_padded, in_mfcc, speaker_vid_idx)
+            out_dir_vec, *_ = self.s2ag_generator(pre_seq, in_text_padded, in_mfcc, speaker_vid_idx)
 
             out_seq_trimodal = out_dir_vec_trimodal[0, :, :].data.cpu().numpy()
             out_seq = out_dir_vec[0, :, :].data.cpu().numpy()
 
             # smoothing motion transition
             if len(out_list_trimodal) > 0:
-                last_poses = out_list_trimodal[-1][-self.s2eg_config_args.n_pre_poses:]
+                last_poses = out_list_trimodal[-1][-self.s2ag_config_args.n_pre_poses:]
                 # delete last 4 frames
-                out_list_trimodal[-1] = out_list_trimodal[-1][:-self.s2eg_config_args.n_pre_poses]
+                out_list_trimodal[-1] = out_list_trimodal[-1][:-self.s2ag_config_args.n_pre_poses]
 
                 for j in range(len(last_poses)):
                     n = len(last_poses)
@@ -1246,9 +1246,9 @@ class Processor(object):
             out_list_trimodal.append(out_seq_trimodal)
 
             if len(out_list) > 0:
-                last_poses = out_list[-1][-self.s2eg_config_args.n_pre_poses:]
+                last_poses = out_list[-1][-self.s2ag_config_args.n_pre_poses:]
                 # delete last 4 frames
-                out_list[-1] = out_list[-1][:-self.s2eg_config_args.n_pre_poses]
+                out_list[-1] = out_list[-1][:-self.s2ag_config_args.n_pre_poses]
 
                 for j in range(len(last_poses)):
                     n = len(last_poses)
@@ -1264,10 +1264,10 @@ class Processor(object):
 
         # fade out to the mean pose
         if fade_out:
-            n_smooth = self.s2eg_config_args.n_pre_poses
+            n_smooth = self.s2ag_config_args.n_pre_poses
             start_frame = len(out_dir_vec_trimodal) - \
                           int(end_padding_duration / data_params['audio_sr']
-                              * self.s2eg_config_args.motion_resampling_framerate)
+                              * self.s2ag_config_args.motion_resampling_framerate)
             end_frame = start_frame + n_smooth * 2
             if len(out_dir_vec_trimodal) < end_frame:
                 out_dir_vec_trimodal = np.pad(out_dir_vec_trimodal,
@@ -1276,10 +1276,10 @@ class Processor(object):
             out_dir_vec_trimodal[end_frame - n_smooth:] = \
                 np.zeros(self.pose_dim)  # fade out to mean poses
 
-            n_smooth = self.s2eg_config_args.n_pre_poses
+            n_smooth = self.s2ag_config_args.n_pre_poses
             start_frame = len(out_dir_vec) - \
                           int(end_padding_duration /
-                              data_params['audio_sr'] * self.s2eg_config_args.motion_resampling_framerate)
+                              data_params['audio_sr'] * self.s2ag_config_args.motion_resampling_framerate)
             end_frame = start_frame + n_smooth * 2
             if len(out_dir_vec) < end_frame:
                 out_dir_vec = np.pad(out_dir_vec, [(0, end_frame - len(out_dir_vec)), (0, 0)],
@@ -1363,18 +1363,18 @@ class Processor(object):
 
     def generate_gestures_by_dataset(self, dataset, data_params, check_duration=True,
                                      randomized=True, fade_out=False,
-                                     load_saved_model=True, s2eg_epoch='best',
+                                     load_saved_model=True, s2ag_epoch='best',
                                      make_video=False, save_pkl=False):
 
         if load_saved_model:
-            s2eg_model_found = self.load_model_at_epoch(epoch=s2eg_epoch)
-            assert s2eg_model_found, print('Speech to emotive gestures model not found')
+            s2ag_model_found = self.load_model_at_epoch(epoch=s2ag_epoch)
+            assert s2ag_model_found, print('Speech to emotive gestures model not found')
             trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
         self.trimodal_generator.eval()
-        self.s2eg_generator.eval()
-        self.s2eg_discriminator.eval()
+        self.s2ag_generator.eval()
+        self.s2ag_discriminator.eval()
 
         overall_start_time = time.time()
 

@@ -1,0 +1,11 @@
+h5py
+matplotlib
+nltk
+numpy
+opencv_python
+pyttsx3
+pyyaml
+scikit-learn
+scipy
+torchtext
+tqdm

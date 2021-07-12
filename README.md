@@ -45,6 +45,8 @@ Note: You might need to manually uninstall and reinstall `numpy` for `torch` to 
 ## Downloading the datasets
 1. The Ted Gestures dataset is available for download [here](https://kaistackr-my.sharepoint.com/:u:/g/personal/zeroyy_kaist_ac_kr/EYAPLf8Hvn9Oq9GMljHDTK4BRab7rl9hAOcnjkriqL8qSg), originally hosted at [https://github.com/ai4r/Gesture-Generation-from-Trimodal-Context](https://github.com/ai4r/Gesture-Generation-from-Trimodal-Context).
 
+2. The Trinity Gesture dataset is available for download on submitting an access request [here](https://trinityspeechgesture.scss.tcd.ie/).
+
 ## Running the code
 Run the `main.py` file with the appropriate command line arguments.
 ```
@@ -57,5 +59,5 @@ For any argument not specificed in the command line, the code uses the default v
 
 On running `main.py`, the code will train the network and generate sample gestures post-training.
 
-We also provide a pretrained model for download at [this link](https://drive.google.com/file/d/1-i4dPMxz38bJOU41c8jDmkiiESqZV5-W/view?usp=sharing). If using this model, save it inside the directory `$BASE/models/mpi` (create the directory if it does not exist). Set the command-line argument `--train` to `False` to skip training and use this model directly for evaluation. The generated samples are stored in the automatically created `render` directory. We generate all the 145 test samples by deafult and also store the corresponding ground truth samples for comparison. We have tested that the samples, stored in `.bvh` files, are compatible with blender.
+We also provide a pretrained model for download at [this link](https://drive.google.com/file/d/1HhSvTxx4VCLOdS7QV5dz4u0BAa85c0J0/view?usp=sharing). If using this model, save it inside the directory `$BASE/models/mpi` (create the directory if it does not exist). Set the command-line argument `--train` to `False` to skip training and use this model directly for evaluation. The generated samples are stored in the automatically created `render` directory. We generate all the 145 test samples by deafult and also store the corresponding ground truth samples for comparison. We have tested that the samples, stored in `.bvh` files, are compatible with blender.
 

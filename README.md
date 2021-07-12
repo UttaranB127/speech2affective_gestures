@@ -53,7 +53,7 @@ Run the `main.py` file with the appropriate command line arguments.
 python main.py <args list>
 ```
 
-The full list of arguments is available inside `main.py`.
+The full list of arguments is available inside `main_v2.py`.
 
 For any argument not specificed in the command line, the code uses the default value for that argument.
 

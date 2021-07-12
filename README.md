@@ -23,7 +23,7 @@ Our scripts have been tested on Ubuntu 18.04 LTS with
 
 1. Clone this repository.
 
-We use $BASE to refer to the base directory for this project (the directory containing `main.py`). Change present working directory to $BASE.
+We use $BASE to refer to the base directory for this project (the directory containing `main_v2.py`). Change present working directory to $BASE.
 
 2. [Optional but recommended] Create a conda envrionment for the project and activate it.
 
@@ -48,15 +48,15 @@ Note: You might need to manually uninstall and reinstall `numpy` for `torch` to 
 2. The Trinity Gesture dataset is available for download on submitting an access request [here](https://trinityspeechgesture.scss.tcd.ie/).
 
 ## Running the code
-Run the `main.py` file with the appropriate command line arguments.
+Run the `main_v2.py` file with the appropriate command line arguments.
 ```
-python main.py <args list>
+python main_v2.py <args list>
 ```
 
 The full list of arguments is available inside `main_v2.py`.
 
 For any argument not specificed in the command line, the code uses the default value for that argument.
 
-On running `main.py`, the code will train the network and generate sample gestures post-training.
+On running `main_v2.py`, the code will train the network and generate sample gestures post-training.
 
 We also provide a pretrained model for download at [this link](https://drive.google.com/file/d/1os20nWp5fLTn2tLLG4Ekc9OnsJlnFjug/view?usp=sharing). If using this model, save it inside the directory `$BASE/models/ted_db` (create the directory if it does not exist). Set the command-line argument `--train-s2ag` to `False` to skip training and use this model directly for evaluation. The generated samples are stored in the automatically created `render` directory.

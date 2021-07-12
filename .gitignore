@@ -1,0 +1,8 @@
+*pycache*
+.idea
+models
+outputs
+videos
+render*
+study_multiple_choices
+z_score_40.pkl

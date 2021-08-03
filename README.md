@@ -1,6 +1,6 @@
 # Speech2AffectiveGestures: Synthesizing Co-Speech Gestures with Generative Adversarial Affective Expression Learning
 
-This is the readme to use the official code for the paper [Speech2AffectiveGestures: Synthesizing Co-Speech Gestures with Generative Adversarial Affective Expression Learning](http://arxiv.org/link_broken). Please use the following citation if you find our work useful:
+This is the readme to use the official code for the paper [Speech2AffectiveGestures: Synthesizing Co-Speech Gestures with Generative Adversarial Affective Expression Learning](https://arxiv.org/pdf/2108.00262.pdf). Please use the following citation if you find our work useful:
 
 ```
 @inproceedings{bhattacharya2021speech2affectivegestures,

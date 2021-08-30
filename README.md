@@ -35,7 +35,7 @@ conda activate s2ag-env
 3. Install PyTorch via conda.
 
 ```
-conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch
+conda install pytorch torchvision torchaudio torchtext cudatoolkit=10.2 -c pytorch
 ```
 Note: You might need to manually uninstall and reinstall `numpy` for `torch` to work.
 

@@ -10,7 +10,7 @@ import torch
 import loader_v2 as loader
 import processor_v2 as processor
 
-from os.path import join as j
+from os.path import join as jn
 
 from config.parse_args import parse_args
 
@@ -18,9 +18,9 @@ warnings.filterwarnings('ignore')
 
 
 base_path = os.path.dirname(os.path.realpath(__file__))
-data_path = j(base_path, '../../data')
+data_path = jn(base_path, '../../data')
 
-models_s2ag_path = j(base_path, 'models', 's2ag_v2_mfcc_run_3')
+models_s2ag_path = jn(base_path, 'models', 's2ag_v2_mfcc_run_3')
 
 
 def str2bool(v):
@@ -108,12 +108,12 @@ randomized = False
 
 s2ag_config_args = parse_args()
 
-args.work_dir_s2ag = j(models_s2ag_path, args.dataset_s2ag)
+args.work_dir_s2ag = jn(models_s2ag_path, args.dataset_s2ag)
 os.makedirs(args.work_dir_s2ag, exist_ok=True)
 
-args.video_save_path = j(base_path, 'outputs', args.dataset_test, 'videos_trimodal_style')
+args.video_save_path = jn(base_path, 'outputs', args.dataset_test, 'videos_trimodal_style')
 os.makedirs(args.video_save_path, exist_ok=True)
-args.quantitative_save_path = j(base_path, 'outputs', 'quantitative')
+args.quantitative_save_path = jn(base_path, 'outputs', 'quantitative')
 os.makedirs(args.quantitative_save_path, exist_ok=True)
 
 train_data_ted, eval_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2ag_config_args)
@@ -134,12 +134,12 @@ if args.train_s2ag:
 data_params = {}
 check_duration = False
 if args.dataset_test.lower() == 'ted_db':
-    data_params = {'env_file': j(data_path, 'ted_db/lmdb_test'),
+    data_params = {'env_file': jn(data_path, 'ted_db/lmdb_test'),
                    'clip_duration_range': [5, 30],
                    'audio_sr': 16000}
     check_duration = True
 elif args.dataset_test.lower() == 'genea_challenge_2020':
-    data_params = {'data_path': '/media/uttaran/repo1/genea_challenge_2020/test'}
+    data_params = {'data_path': jn(data_path, 'genea_challenge_2020/test')}
 
 pr.generate_gestures_by_dataset(dataset=args.dataset_test, data_params=data_params,
                                 randomized=randomized, check_duration=check_duration,

@@ -125,6 +125,7 @@ def create_video_and_save(save_path, epoch, prefix, iter_idx, target, output_tri
     # save video
     try:
         video_path = '{}/temp_{}_{:03d}_{}.mp4'.format(save_path, prefix, epoch, iter_idx)
+        video_path = 'temp.mp4'
         ani.save(video_path, fps=15, dpi=80)  # dpi 150 for a higher resolution
         del ani
         plt.close(fig)

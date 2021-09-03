@@ -1099,7 +1099,7 @@ class Processor(object):
             clip_duration = clip_time[1] - clip_time[0]
             if clip_duration < data_params['clip_duration_range'][0] or \
                     clip_duration > data_params['clip_duration_range'][1]:
-                return
+                return None, None, None
 
         # synthesize
         for selected_vi in range(len(clip_words)):  # make start time of input text zero
@@ -1312,20 +1312,20 @@ class Processor(object):
             out_dir_vec_trimodal[start_frame:end_frame] = interpolated_y_trimodal
             out_dir_vec[start_frame:end_frame] = interpolated_y
 
+        filename_prefix = '{}_{}_{}'.format(vid_name, speaker_vid_idx, clip_idx)
+        filename_prefix_for_save = filename_prefix.split('_tensor')[0]
+        sentence_words = []
+        for word, _, _ in clip_words:
+            sentence_words.append(word)
+        sentence = ' '.join(sentence_words)
+
         # make a video
         if make_video:
-            sentence_words = []
-            for word, _, _ in clip_words:
-                sentence_words.append(word)
-            sentence = ' '.join(sentence_words)
-
-            filename_prefix = '{}_{}_{}'.format(vid_name, speaker_vid_idx, clip_idx)
-            filename_prefix_for_video = filename_prefix
             aux_str = '({}, time: {}-{})'.format(vid_name,
                                                  str(datetime.timedelta(seconds=clip_time[0])),
                                                  str(datetime.timedelta(seconds=clip_time[1])))
             create_video_and_save(
-                self.args.video_save_path, 0, filename_prefix_for_video, 0, target_dir_vec,
+                self.args.video_save_path, self.best_s2ag_loss_epoch, filename_prefix_for_save, 0, target_dir_vec,
                 out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
                 audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
                 delete_audio_file=False)
@@ -1346,7 +1346,7 @@ class Processor(object):
                 'human_dir_vec': target_dir_vec + mean_dir_vec,
             }
             with open(jn(self.args.video_save_path,
-                         '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
+                         '{}_trimodal.pkl'.format(filename_prefix_for_save)), 'wb') as f:
                 pickle.dump(save_dict, f)
 
             save_dict = {

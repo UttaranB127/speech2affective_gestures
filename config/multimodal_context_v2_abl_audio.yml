@@ -8,7 +8,7 @@ wordembed_dim: 300
 wordembed_path: /mnt/q/Gamma/Gestures/src/data/fasttext/crawl-300d-2M-subword.bin
 #freeze_wordembed: true
 
-model_save_path: /mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures/output/train_multimodal_context
+model_save_path: /mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures/outputs/train_multimodal_context
 random_seed: -1
 
 # data params
@@ -36,7 +36,7 @@ loss_kld_weight: 0.1
 loss_reg_weight: 0.05
 
 # eval params
-eval_net_path: /mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures/output/train_h36m_gesture_autoencoder/gesture_autoencoder_checkpoint_best.bin
+eval_net_path: /mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures/outputs/train_h36m_gesture_autoencoder/gesture_autoencoder_checkpoint_best.bin
 
 # dataset params
 motion_resampling_framerate: 15

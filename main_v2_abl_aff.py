@@ -17,7 +17,8 @@ from config.parse_args import parse_args
 warnings.filterwarnings('ignore')
 
 
-base_path = os.path.dirname(os.path.realpath(__file__))
+# base_path = os.path.dirname(os.path.realpath(__file__))
+base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
 data_path = j(base_path, '../../data')
 
 models_s2eg_path = j(base_path, 'models', 's2eg_v2_abl_aff')

@@ -30,7 +30,11 @@ from utils.gen_utils import create_video_and_save
 from utils import losses
 from utils.ted_db_utils import *
 
+
 torch.manual_seed(1234)
+
+# base_path = os.path.dirname(os.path.realpath(__file__))
+base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
 
 rec_loss = losses.quat_angle_loss
 
@@ -957,7 +961,7 @@ class Processor(object):
         self.io.print_timer()
 
     def train(self):
-        trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
+        trimodal_checkpoint = torch.load(jn(base_path, 'outputs', 'trimodal_gen.pth.tar'))
         self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
         if self.args.s2eg_load_last_best:
@@ -1001,7 +1005,7 @@ class Processor(object):
         if load_saved_model:
             s2eg_model_found = self.load_model_at_epoch(epoch=s2eg_epoch)
             assert s2eg_model_found, print('Speech to emotive gestures model not found')
-            trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
+            trimodal_checkpoint = torch.load(jn(base_path, 'outputs', 'trimodal_gen.pth.tar'))
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
         self.trimodal_generator.eval()
@@ -1076,7 +1080,7 @@ class Processor(object):
         if load_saved_model:
             s2eg_model_found = self.load_model_at_epoch(epoch=s2eg_epoch)
             assert s2eg_model_found, print('Speech to emotive gestures model not found')
-            trimodal_checkpoint = torch.load('outputs/trimodal_gen.pth.tar')
+            trimodal_checkpoint = torch.load(jn(base_path, 'outputs', 'trimodal_gen.pth.tar'))
             self.trimodal_generator.load_state_dict(trimodal_checkpoint['trimodal_gen_dict'])
 
         self.trimodal_generator.eval()

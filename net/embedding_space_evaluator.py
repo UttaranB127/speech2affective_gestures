@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import umap
 import warnings
 
+from os.path import join as jn
 from scipy import linalg
 
 from net.embedding_net import EmbeddingNet
@@ -11,12 +12,16 @@ from net.embedding_net import EmbeddingNet
 warnings.filterwarnings("ignore", category=RuntimeWarning)  # ignore warnings
 
 
+# base_path = os.path.dirname(os.path.realpath(__file__))
+base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
+
+
 class EmbeddingSpaceEvaluator:
     def __init__(self, args, pose_dim, lang_model, device):
         self.n_pre_poses = args.n_pre_poses
 
         # init embed net
-        checkpoint = torch.load('outputs/embedding_net.pth.tar')
+        checkpoint = torch.load(jn(base_path, 'outputs/embedding_net.pth.tar'))
         n_frames = args.n_poses
         word_embeddings = lang_model.word_embedding_weights
         mode = 'pose'

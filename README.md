@@ -32,14 +32,20 @@ conda create s2ag-env python=3.7
 conda activate s2ag-env
 ```
 
-3. Install the package requirements.
+3. Install `espeak`.
+
+````
+sudo apt-get update && sudo apt-get install espeak
+```
+
+4. Install the package requirements.
 
 ```
 pip install -r requirements.txt
 ```
 Note: You might need to manually uninstall and reinstall `matplotlib` and `kiwisolver` for them to work.
 
-4. Install PyTorch following the [official instructions](https://pytorch.org/).
+5. Install PyTorch following the [official instructions](https://pytorch.org/).
 Note: You might need to manually uninstall and reinstall `numpy` for `torch` to work.
 
 ## Downloading the datasets

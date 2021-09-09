@@ -27,7 +27,10 @@ from utils.vocab import Vocab
 from utils.vocab_utils import build_vocab
 
 
-nrc_vad_lexicon_file = '../../data/NRC-VAD-Lexicon-Aug2018Release/NRC-VAD-Lexicon.txt'
+# base_path = os.path.dirname(os.path.realpath(__file__))
+base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
+
+nrc_vad_lexicon_file = j(base_path, '../../data/NRC-VAD-Lexicon-Aug2018Release/NRC-VAD-Lexicon.txt')
 nrc_vad_lexicon = {}
 
 with open(nrc_vad_lexicon_file, 'r') as nf:

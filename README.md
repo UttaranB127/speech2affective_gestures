@@ -34,7 +34,7 @@ conda activate s2ag-env
 
 3. Install `espeak`.
 
-````
+```
 sudo apt-get update && sudo apt-get install espeak
 ```
 

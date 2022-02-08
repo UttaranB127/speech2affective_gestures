@@ -66,6 +66,6 @@ For any argument not specificed in the command line, the code uses the default v
 On running `main_v2.py`, the code will train the network and generate sample gestures post-training.
 
 ## Pre-trained models
-We also provide a pretrained model for download at [this link](https://drive.google.com/file/d/1os20nWp5fLTn2tLLG4Ekc9OnsJlnFjug/view?usp=sharing). If using this model, save it inside the directory `$BASE/models/ted_db` (create the directory if it does not exist). Set the command-line argument `--train` to `False` to skip training and use this model directly for evaluation. The generated samples are stored in the automatically created `render` directory.
+We also provide a [pretrained model for download](https://drive.google.com/file/d/1os20nWp5fLTn2tLLG4Ekc9OnsJlnFjug/view?usp=sharing). If using this model, save it inside the directory `$BASE/models/ted_db` (create the directory if it does not exist). Set the command-line argument `--train` to `False` to skip training and use this model directly for evaluation. The generated samples are stored in the automatically created `render` directory.
 
 Additionally, we provide the [pre-trained weights of the embedding network](https://drive.google.com/file/d/17Fmk7lzyWhALXdmGW7hLNejEAFab8Tfr/view?usp=sharing) required to estimate the Fréchet Gesture Distance between the ground-truth and the synthesized gestures. If using these weights, store them in the directory `$BASE/outputs`.

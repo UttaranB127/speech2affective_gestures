@@ -64,7 +64,7 @@ def parse_args():
     parser.add("--loss_warmup", type=int, default=-1)
 
     # eval
-    parser.add("--eval_net_path", type=str, default='')
+    parser.add("--val_net_path", type=str, default='')
 
     args = parser.parse_args()
     return args

@@ -125,7 +125,7 @@ class Processor(object):
         self.zfill = zfill
         self.lang_model = self.data_loader['train_data_s2ag'].lang_model
         self.train_speaker_model = self.data_loader['train_data_s2ag'].speaker_model
-        self.eval_speaker_model = self.data_loader['eval_data_s2ag'].speaker_model
+        self.val_speaker_model = self.data_loader['val_data_s2ag'].speaker_model
         self.test_speaker_model = self.data_loader['test_data_s2ag'].speaker_model
         self.trimodal_generator = PGT(self.s2ag_config_args,
                                       pose_dim=self.pose_dim,
@@ -172,10 +172,10 @@ class Processor(object):
             self.s2ag_discriminator.to(self.device)
 
         self.num_train_samples = self.data_loader['train_data_s2ag'].n_samples
-        self.num_eval_samples = self.data_loader['eval_data_s2ag'].n_samples
+        self.num_val_samples = self.data_loader['val_data_s2ag'].n_samples
         self.num_test_samples = self.data_loader['test_data_s2ag'].n_samples
-        self.num_total_samples = self.num_train_samples + self.num_eval_samples + self.num_test_samples
-        npz_path = jn(self.args.data_path, self.args.dataset_s2ag, 'npz')
+        self.num_total_samples = self.num_train_samples + self.num_val_samples + self.num_test_samples
+        npz_path = jn(self.args.data_path, self.args.dataset_s2ag, 'npz', 'full')
         os.makedirs(npz_path, exist_ok=True)
         if self.args.train_s2ag:
             print('Total s2ag training data:\t\t{:>6} ({:.2f}%)'.format(
@@ -185,15 +185,15 @@ class Processor(object):
             if not os.path.exists(train_file_name):
                 self.save_cache('train', train_file_name)
             self.load_cache('train', train_file_name)
-            print('Total s2ag evaluation data:\t\t{:>6} ({:.2f}%)'.format(
-                self.num_eval_samples, 100. * self.num_eval_samples / self.num_total_samples))
-            eval_file_name = jn(npz_path, 'eval.npz')
-            if not os.path.exists(eval_file_name):
-                self.save_cache('eval', eval_file_name)
-            self.load_cache('eval', eval_file_name)
+            print('Total s2ag validation data:\t\t{:>6} ({:.2f}%)'.format(
+                self.num_val_samples, 100. * self.num_val_samples / self.num_total_samples))
+            val_file_name = jn(npz_path, 'val.npz')
+            if not os.path.exists(val_file_name):
+                self.save_cache('val', val_file_name)
+            self.load_cache('val', val_file_name)
         else:
             self.train_samples = None
-            self.eval_samples = None
+            self.val_samples = None
 
         print('Total s2ag testing data:\t\t{:>6} ({:.2f}%)'.format(
             self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))
@@ -225,8 +225,8 @@ class Processor(object):
                         }
         if part == 'train':
             self.train_samples = samples_dict
-        elif part == 'eval':
-            self.eval_samples = samples_dict
+        elif part == 'val':
+            self.val_samples = samples_dict
         elif part == 'test':
             self.test_samples = samples_dict
         print(' took {:>6} seconds.'.format(int(np.ceil(time.time() - start_time))))
@@ -234,13 +234,13 @@ class Processor(object):
     def save_cache(self, part, file_name):
         data_s2ag = self.data_loader['{}_data_s2ag'.format(part)]
         num_samples = self.num_train_samples if part == 'train' else\
-            (self.num_eval_samples if part == 'eval' else self.num_test_samples)
+            (self.num_val_samples if part == 'val' else self.num_test_samples)
 
         extended_word_seq_all = np.zeros((num_samples, self.time_steps), dtype=np.int64)
         vec_seq_all = np.zeros((num_samples, self.time_steps, self.pose_dim))
         audio_all = np.zeros((num_samples, self.audio_length), dtype=np.int16)
         audio_max_all = np.zeros(num_samples)
-        mfcc_features_all = np.zeros((num_samples, 13, self.mfcc_length))
+        mfcc_features_all = np.zeros((num_samples, self.num_mfcc, self.mfcc_length))
         # vid_indices_all = np.zeros(num_samples, dtype=np.int64)
         print('Caching {} data {:>6}/{}.'.format(part, 0, num_samples), end='')
         for k in range(num_samples):
@@ -402,8 +402,8 @@ class Processor(object):
             data_s2ag = self.data_loader['train_data_s2ag']
             num_data = self.num_train_samples
         else:
-            data_s2ag = self.data_loader['eval_data_s2ag']
-            num_data = self.num_eval_samples
+            data_s2ag = self.data_loader['val_data_s2ag']
+            num_data = self.num_val_samples
 
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
         prob_dist = np.ones(num_data) / float(num_data)
@@ -457,9 +457,9 @@ class Processor(object):
         #             batch_vid_indices[_i] = \
         #                 torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
         #     else:
-        #         if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
+        #         if self.val_speaker_model and self.val_speaker_model.__class__.__name__ == 'Vocab':
         #             batch_vid_indices[_i] = \
-        #                 torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
+        #                 torch.LongTensor([self.val_speaker_model.word2index[aux_info['vid']]])
 
         for p in range(pseudo_passes):
             rand_keys = np.random.choice(num_data, size=self.args.batch_size, replace=True, p=prob_dist)
@@ -472,12 +472,12 @@ class Processor(object):
                     mfcc_features = self.train_samples['mfcc_features'][k]
                     aux_info = self.train_samples['aux_info'].item()[str(k).zfill(6)]
                 else:
-                    word_seq = self.eval_samples['word_seq'].item()[str(k).zfill(6)]
-                    pose_seq = self.eval_samples['pose_seq'][k]
-                    vec_seq = self.eval_samples['vec_seq'][k]
-                    audio = self.eval_samples['audio'][k] / 32767 * self.eval_samples['audio_max'][k]
-                    mfcc_features = self.eval_samples['mfcc_features'][k]
-                    aux_info = self.eval_samples['aux_info'].item()[str(k).zfill(6)]
+                    word_seq = self.val_samples['word_seq'].item()[str(k).zfill(6)]
+                    pose_seq = self.val_samples['pose_seq'][k]
+                    vec_seq = self.val_samples['vec_seq'][k]
+                    audio = self.val_samples['audio'][k] / 32767 * self.val_samples['audio_max'][k]
+                    mfcc_features = self.val_samples['mfcc_features'][k]
+                    aux_info = self.val_samples['aux_info'].item()[str(k).zfill(6)]
 
                 duration = aux_info['end_time'] - aux_info['start_time']
                 do_clipping = True
@@ -515,9 +515,9 @@ class Processor(object):
                         batch_vid_indices[i] = \
                             torch.LongTensor([self.train_speaker_model.word2index[aux_info['vid']]])
                 else:
-                    if self.eval_speaker_model and self.eval_speaker_model.__class__.__name__ == 'Vocab':
+                    if self.val_speaker_model and self.val_speaker_model.__class__.__name__ == 'Vocab':
                         batch_vid_indices[i] = \
-                            torch.LongTensor([self.eval_speaker_model.word2index[aux_info['vid']]])
+                            torch.LongTensor([self.val_speaker_model.word2index[aux_info['vid']]])
 
             # with data_s2ag.lmdb_env.begin(write=False) as txn:
             #     threads = []
@@ -534,8 +534,8 @@ class Processor(object):
             data_s2ag = self.data_loader['train_data_s2ag']
             num_data = self.num_train_samples
         else:
-            data_s2ag = self.data_loader['eval_data_s2ag']
-            num_data = self.num_eval_samples
+            data_s2ag = self.data_loader['val_data_s2ag']
+            num_data = self.num_val_samples
 
         pseudo_passes = (num_data + self.args.batch_size - 1) // self.args.batch_size
         prob_dist = np.ones(num_data) / float(num_data)
@@ -554,14 +554,14 @@ class Processor(object):
                 curr_vid_indices = self.train_samples['vid_indices'][rand_keys]
             else:
                 batch_extended_word_seq = torch.from_numpy(
-                    self.eval_samples['extended_word_seq'][rand_keys]).to(self.device)
-                batch_vec_seq = torch.from_numpy(self.eval_samples['vec_seq'][rand_keys]).float().to(self.device)
+                    self.val_samples['extended_word_seq'][rand_keys]).to(self.device)
+                batch_vec_seq = torch.from_numpy(self.val_samples['vec_seq'][rand_keys]).float().to(self.device)
                 batch_audio = torch.from_numpy(
-                    self.eval_samples['audio'][rand_keys] *
-                    self.eval_samples['audio_max'][rand_keys, None] / 32767).float().to(self.device)
+                    self.val_samples['audio'][rand_keys] *
+                    self.val_samples['audio_max'][rand_keys, None] / 32767).float().to(self.device)
                 batch_mfcc_features = torch.from_numpy(
-                    self.eval_samples['mfcc_features'][rand_keys]).float().to(self.device)
-                curr_vid_indices = self.eval_samples['vid_indices'][rand_keys]
+                    self.val_samples['mfcc_features'][rand_keys]).float().to(self.device)
+                curr_vid_indices = self.val_samples['vid_indices'][rand_keys]
 
             # speaker input
             batch_vid_indices = None
@@ -571,10 +571,10 @@ class Processor(object):
                     np.random.choice(np.setdiff1d(list(self.train_speaker_model.word2index.values()),
                                                   curr_vid_indices))
                     for _ in range(self.args.batch_size)]).to(self.device)
-            elif self.eval_speaker_model and\
-                    self.eval_speaker_model.__class__.__name__ == 'Vocab':
+            elif self.val_speaker_model and\
+                    self.val_speaker_model.__class__.__name__ == 'Vocab':
                 batch_vid_indices = torch.LongTensor([
-                    np.random.choice(np.setdiff1d(list(self.eval_speaker_model.word2index.values()),
+                    np.random.choice(np.setdiff1d(list(self.val_speaker_model.word2index.values()),
                                                   curr_vid_indices))
                     for _ in range(self.args.batch_size)]).to(self.device)
 
@@ -933,12 +933,12 @@ class Processor(object):
 
         # self.adjust_lr_s2ag()
 
-    def per_eval_epoch(self):
+    def per_val_epoch(self):
 
         self.s2ag_generator.eval()
         self.s2ag_discriminator.eval()
         batch_s2ag_loss = 0.
-        num_batches = self.num_eval_samples // self.args.batch_size + 1
+        num_batches = self.num_val_samples // self.args.batch_size + 1
 
         start_time = time.time()
         self.meta_info['iter'] = 0
@@ -997,11 +997,11 @@ class Processor(object):
             self.per_train_epoch()
             self.io.print_log('Done.')
 
-            # evaluation
-            if (epoch % self.args.eval_interval == 0) or (
+            # validation
+            if (epoch % self.args.val_interval == 0) or (
                     epoch + 1 == self.args.num_epoch):
-                self.io.print_log('s2ag eval epoch: {}'.format(epoch))
-                self.per_eval_epoch()
+                self.io.print_log('s2ag val epoch: {}'.format(epoch))
+                self.per_val_epoch()
                 self.io.print_log('Done.')
 
             # save model and weights

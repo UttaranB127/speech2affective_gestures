@@ -37,7 +37,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
 parser.add_argument('--dataset-s2ag', type=str, default='ted_db', metavar='D-S2G',
-                    help='dataset to train and evaluate speech to emotive gestures (default: ted_db)')
+                    help='dataset to train and validate speech to emotive gestures (default: ted_db)')
 parser.add_argument('--dataset-test', type=str, default='ted_db', metavar='D-TST',
                     help='dataset to test emotive gestures (options: ted_db, genea_challenge_2020)')
 parser.add_argument('-dap', '--dataset-s2ag-already-processed',
@@ -47,7 +47,7 @@ parser.add_argument('-dap', '--dataset-s2ag-already-processed',
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
-parser.add_argument('--train-s2ag', type=bool, default=False, metavar='T-s2ag',
+parser.add_argument('--train-s2ag', type=bool, default=True, metavar='T-s2ag',
                     help='train the s2ag model (default: True)')
 parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
@@ -87,8 +87,8 @@ parser.add_argument('--quat-reg', type=float, default=1.2, metavar='QR',
                     help='regularization for quaternion loss (default: 0.01)')
 parser.add_argument('--recons-reg', type=float, default=1.2, metavar='RCR',
                     help='regularization for reconstruction loss (default: 1.2)')
-parser.add_argument('--eval-interval', type=int, default=1, metavar='EI',
-                    help='interval after which model is evaluated (default: 1)')
+parser.add_argument('--val-interval', type=int, default=1, metavar='EI',
+                    help='interval after which model is validated (default: 1)')
 parser.add_argument('--log-interval', type=int, default=200, metavar='LI',
                     help='interval after which log is printed (default: 100)')
 parser.add_argument('--save-interval', type=int, default=10, metavar='SI',
@@ -117,9 +117,9 @@ os.makedirs(args.video_save_path, exist_ok=True)
 args.quantitative_save_path = jn(base_path, 'outputs', 'quantitative')
 os.makedirs(args.quantitative_save_path, exist_ok=True)
 
-train_data_ted, eval_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2ag_config_args)
+train_data_ted, val_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2ag_config_args)
 
-data_loader = dict(train_data_s2ag=train_data_ted, eval_data_s2ag=eval_data_ted, test_data_s2ag=test_data_ted)
+data_loader = dict(train_data_s2ag=train_data_ted, val_data_s2ag=val_data_ted, test_data_s2ag=test_data_ted)
 pose_dim = 27
 coords = 3
 audio_sr = 16000

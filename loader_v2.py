@@ -103,23 +103,23 @@ def get_gesture_splits(sentence, words, num_frames, fps):
     return int(best_rate), splits
 
 
-def split_data_dict(data_dict, eval_size=0.1, randomized=True, fill=1):
+def split_data_dict(data_dict, val_size=0.1, randomized=True, fill=1):
     num_samples = len(data_dict)
-    num_samples_eval = int(round(eval_size * num_samples))
+    num_samples_val = int(round(val_size * num_samples))
     samples_all = np.array(list(data_dict.keys()), dtype=int)
     if randomized:
-        samples_eval = np.random.choice(samples_all, num_samples_eval, replace=False)
+        samples_val = np.random.choice(samples_all, num_samples_val, replace=False)
     else:
-        # samples_eval = samples_all[-num_samples_eval:]
-        samples_eval = np.loadtxt('samples_eval.txt').astype(int)
-    samples_train = np.setdiff1d(samples_all, samples_eval)
+        # samples_val = samples_all[-num_samples_val:]
+        samples_val = np.loadtxt('samples_val.txt').astype(int)
+    samples_train = np.setdiff1d(samples_all, samples_val)
     data_dict_train = dict()
-    data_dict_eval = dict()
+    data_dict_val = dict()
     for idx, sample_idx in enumerate(samples_train):
         data_dict_train[str(idx).zfill(fill)] = data_dict[str(sample_idx).zfill(fill)]
-    for idx, sample_idx in enumerate(samples_eval):
-        data_dict_eval[str(idx).zfill(fill)] = data_dict[str(sample_idx).zfill(fill)]
-    return data_dict_train, data_dict_eval
+    for idx, sample_idx in enumerate(samples_val):
+        data_dict_val[str(idx).zfill(fill)] = data_dict[str(sample_idx).zfill(fill)]
+    return data_dict_train, data_dict_val
 
 
 def to_one_hot(categorical_value, categories):
@@ -193,24 +193,24 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
     processed_dir = j(dataset_dir, 'processed_07_cats')
     os.makedirs(processed_dir, exist_ok=True)
     train_data_wav_file = j(processed_dir, 'train_data_wav.npz')
-    eval_data_wav_file = j(processed_dir, 'eval_data_wav.npz')
+    val_data_wav_file = j(processed_dir, 'val_data_wav.npz')
     test_data_wav_file = j(processed_dir, 'test_data_wav.npz')
     train_labels_cat_file = j(processed_dir, 'train_labels_cat.npz')
-    eval_labels_cat_file = j(processed_dir, 'eval_labels_cat.npz')
+    val_labels_cat_file = j(processed_dir, 'val_labels_cat.npz')
     test_labels_cat_file = j(processed_dir, 'test_labels_cat.npz')
     train_labels_dim_file = j(processed_dir, 'train_labels_dim.npz')
-    eval_labels_dim_file = j(processed_dir, 'eval_labels_dim.npz')
+    val_labels_dim_file = j(processed_dir, 'val_labels_dim.npz')
     test_labels_dim_file = j(processed_dir, 'test_labels_dim.npz')
     stats_file = j(processed_dir, 'stats.pkl')
 
     if not (os.path.exists(train_data_wav_file)
-            and os.path.exists(eval_data_wav_file)
+            and os.path.exists(val_data_wav_file)
             and os.path.exists(test_data_wav_file)
             and os.path.exists(train_labels_cat_file)
-            and os.path.exists(eval_labels_cat_file)
+            and os.path.exists(val_labels_cat_file)
             and os.path.exists(test_labels_cat_file)
             and os.path.exists(train_labels_dim_file)
-            and os.path.exists(eval_labels_dim_file)
+            and os.path.exists(val_labels_dim_file)
             and os.path.exists(test_labels_dim_file)
             and os.path.exists(stats_file)):
 
@@ -223,7 +223,7 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         labels_dim_list = []
         data_count = 0
         train_idx = []
-        eval_idx = []
+        val_idx = []
         test_idx = []
         print('--------: -------------- (-- of --). Part -- of --. Total data size: ------', end='')
 
@@ -318,29 +318,29 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
                         if wav_file_name.split('/')[-1][-8] == 'M':
                             append_idx(test_idx, data_count, time, block_size)
                         else:
-                            append_idx(eval_idx, data_count, time, block_size)
+                            append_idx(val_idx, data_count, time, block_size)
 
         print()
         train_data_wav_1 = np.array([data_wav_list_1[i] for i in train_idx])
         train_data_wav_2 = np.array([data_wav_list_2[i] for i in train_idx])
         train_data_wav_3 = np.array([data_wav_list_3[i] for i in train_idx])
 
-        eval_data_wav_1 = np.array([data_wav_list_1[i] for i in eval_idx])
-        eval_data_wav_2 = np.array([data_wav_list_2[i] for i in eval_idx])
-        eval_data_wav_3 = np.array([data_wav_list_3[i] for i in eval_idx])
+        val_data_wav_1 = np.array([data_wav_list_1[i] for i in val_idx])
+        val_data_wav_2 = np.array([data_wav_list_2[i] for i in val_idx])
+        val_data_wav_3 = np.array([data_wav_list_3[i] for i in val_idx])
 
         test_data_wav_1 = np.array([data_wav_list_1[i] for i in test_idx])
         test_data_wav_2 = np.array([data_wav_list_2[i] for i in test_idx])
         test_data_wav_3 = np.array([data_wav_list_3[i] for i in test_idx])
 
         train_labels_cat = np.array([labels_cat_list[i] for i in train_idx])
-        eval_labels_cat = np.array([labels_cat_list[i] for i in eval_idx])
+        val_labels_cat = np.array([labels_cat_list[i] for i in val_idx])
         test_labels_cat = np.array([labels_cat_list[i] for i in test_idx])
 
         train_labels_dim = \
             (np.array([labels_dim_list[i] for i in train_idx]) - dimensional_min) / (dimensional_max - dimensional_min)
-        eval_labels_dim = \
-            (np.array([labels_dim_list[i] for i in eval_idx]) - dimensional_min) / (dimensional_max - dimensional_min)
+        val_labels_dim = \
+            (np.array([labels_dim_list[i] for i in val_idx]) - dimensional_min) / (dimensional_max - dimensional_min)
         test_labels_dim = \
             (np.array([labels_dim_list[i] for i in test_idx]) - dimensional_min) / (dimensional_max - dimensional_min)
 
@@ -354,9 +354,9 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         #                                        (train_data_wav_2 - mean2) / (std2 + epsilon),
         #                                        (train_data_wav_3 - mean3) / (std3 + epsilon)]),
         #                              0, 1)
-        # eval_data_wav = np.moveaxis(np.array([(eval_data_wav_1 - mean1) / (std1 + epsilon),
-        #                                       (eval_data_wav_2 - mean2) / (std2 + epsilon),
-        #                                       (eval_data_wav_3 - mean3) / (std3 + epsilon)]),
+        # val_data_wav = np.moveaxis(np.array([(val_data_wav_1 - mean1) / (std1 + epsilon),
+        #                                      (val_data_wav_2 - mean2) / (std2 + epsilon),
+        #                                      (val_data_wav_3 - mean3) / (std3 + epsilon)]),
         #                             0, 1)
         # test_data_wav = np.moveaxis(np.array([(test_data_wav_1 - mean1) / (std1 + epsilon),
         #                                       (test_data_wav_2 - mean2) / (std2 + epsilon),
@@ -373,10 +373,10 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
                                                (train_data_wav_2 - min2) / (max2 - min2),
                                                (train_data_wav_3 - min3) / (max3 - min3)]),
                                      0, 1)
-        eval_data_wav = np.moveaxis(np.array([(eval_data_wav_1 - min1) / (max1 - min1),
-                                              (eval_data_wav_2 - min2) / (max2 - min2),
-                                              (eval_data_wav_3 - min3) / (max3 - min3)]),
-                                    0, 1)
+        val_data_wav = np.moveaxis(np.array([(val_data_wav_1 - min1) / (max1 - min1),
+                                             (val_data_wav_2 - min2) / (max2 - min2),
+                                             (val_data_wav_3 - min3) / (max3 - min3)]),
+                                   0, 1)
         test_data_wav = np.moveaxis(np.array([(test_data_wav_1 - min1) / (max1 - min1),
                                               (test_data_wav_2 - min2) / (max2 - min2),
                                               (test_data_wav_3 - min3) / (max3 - min3)]),
@@ -384,22 +384,22 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
 
         np.savez_compressed(train_data_wav_file, train_data_wav)
         print('Successfully saved wave train data.')
-        np.savez_compressed(eval_data_wav_file, eval_data_wav)
-        print('Successfully saved wave eval data.')
+        np.savez_compressed(val_data_wav_file, val_data_wav)
+        print('Successfully saved wave val data.')
         np.savez_compressed(test_data_wav_file, test_data_wav)
         print('Successfully saved wave test data.')
 
         np.savez_compressed(train_labels_cat_file, train_labels_cat)
         print('Successfully saved categorical train labels.')
-        np.savez_compressed(eval_labels_cat_file, eval_labels_cat)
-        print('Successfully saved categorical eval labels.')
+        np.savez_compressed(val_labels_cat_file, val_labels_cat)
+        print('Successfully saved categorical val labels.')
         np.savez_compressed(test_labels_cat_file, test_labels_cat)
         print('Successfully saved categorical test labels.')
 
         np.savez_compressed(train_labels_dim_file, train_labels_dim)
         print('Successfully saved dimensional train labels.')
-        np.savez_compressed(eval_labels_dim_file, eval_labels_dim)
-        print('Successfully saved dimensional eval labels.')
+        np.savez_compressed(val_labels_dim_file, val_labels_dim)
+        print('Successfully saved dimensional val labels.')
         np.savez_compressed(test_labels_dim_file, test_labels_dim)
         print('Successfully saved dimensional test labels.')
 
@@ -414,15 +414,15 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         print('Successfully saved stats.')
     else:
         train_data_wav = np.load(train_data_wav_file)['arr_0']
-        eval_data_wav = np.load(eval_data_wav_file)['arr_0']
+        val_data_wav = np.load(val_data_wav_file)['arr_0']
         test_data_wav = np.load(test_data_wav_file)['arr_0']
 
         train_labels_cat = np.load(train_labels_cat_file)['arr_0']
-        eval_labels_cat = np.load(eval_labels_cat_file)['arr_0']
+        val_labels_cat = np.load(val_labels_cat_file)['arr_0']
         test_labels_cat = np.load(test_labels_cat_file)['arr_0']
 
         train_labels_dim = np.load(train_labels_dim_file)['arr_0']
-        eval_labels_dim = np.load(eval_labels_dim_file)['arr_0']
+        val_labels_dim = np.load(val_labels_dim_file)['arr_0']
         test_labels_dim = np.load(test_labels_dim_file)['arr_0']
 
         with open(stats_file, 'rb') as af:
@@ -430,9 +430,9 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         max_all = np.array(stats[:3])
         min_all = np.array(stats[3:])
 
-    return train_data_wav, eval_data_wav, test_data_wav, \
-        train_labels_cat, eval_labels_cat, test_labels_cat, \
-        train_labels_dim, eval_labels_dim, test_labels_dim, \
+    return train_data_wav, val_data_wav, test_data_wav, \
+        train_labels_cat, val_labels_cat, test_labels_cat, \
+        train_labels_dim, val_labels_dim, test_labels_dim, \
         max_all, min_all
 
 
@@ -563,17 +563,17 @@ def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
                                 mean_pose=config_args.mean_pose,
                                 num_mfcc=config_args.num_mfcc,
                                 remove_word_timing=(config_args.input_context == 'text')
-                                )
-
-    eval_dataset = TedDBParams(config_args.val_data_path[0],
-                               n_poses=config_args.n_poses,
-                               subdivision_stride=config_args.subdivision_stride,
-                               pose_resampling_fps=config_args.motion_resampling_framerate,
-                               mean_dir_vec=mean_dir_vec,
-                               mean_pose=config_args.mean_pose,
-                               num_mfcc=config_args.num_mfcc,
-                               remove_word_timing=(config_args.input_context == 'text')
                                )
+
+    val_dataset = TedDBParams(config_args.val_data_path[0],
+                              n_poses=config_args.n_poses,
+                              subdivision_stride=config_args.subdivision_stride,
+                              pose_resampling_fps=config_args.motion_resampling_framerate,
+                              mean_dir_vec=mean_dir_vec,
+                              mean_pose=config_args.mean_pose,
+                              num_mfcc=config_args.num_mfcc,
+                              remove_word_timing=(config_args.input_context == 'text')
+                             )
 
     test_dataset = TedDBParams(config_args.test_data_path[0],
                                n_poses=config_args.n_poses,
@@ -581,25 +581,26 @@ def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
                                pose_resampling_fps=config_args.motion_resampling_framerate,
                                mean_dir_vec=mean_dir_vec,
                                num_mfcc=config_args.num_mfcc,
-                               mean_pose=config_args.mean_pose)
+                               mean_pose=config_args.mean_pose
+                              )
 
     # build vocab
     vocab_cache_path = j(os.path.split(config_args.train_data_path[0])[0],
                          'vocab_models_s2ag',
                          'vocab_cache.pkl')
-    lang_model = build_vocab('words', [train_dataset, eval_dataset, test_dataset],
+    lang_model = build_vocab('words', [train_dataset, val_dataset, test_dataset],
                              vocab_cache_path, config_args.wordembed_path,
                              config_args.wordembed_dim)
     train_dataset.set_lang_model(lang_model)
-    eval_dataset.set_lang_model(lang_model)
+    val_dataset.set_lang_model(lang_model)
     test_dataset.set_lang_model(lang_model)
 
     if not ted_db_npz_already_processed:
         save_as_npz(train_dataset, 'train')
-        save_as_npz(train_dataset, 'eval')
+        save_as_npz(train_dataset, 'val')
         save_as_npz(train_dataset, 'test')
 
-    return train_dataset, eval_dataset, test_dataset
+    return train_dataset, val_dataset, test_dataset
 
 
 def build_vocab_idx(word_instants, min_word_count):

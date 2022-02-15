@@ -164,31 +164,31 @@ class Processor(object):
         self.num_val_samples = self.data_loader['val_data_s2eg'].n_samples
         self.num_test_samples = self.data_loader['test_data_s2eg'].n_samples
         self.num_total_samples = self.num_train_samples + self.num_val_samples + self.num_test_samples
-        npz_path = jn(self.args.data_path, self.args.dataset_s2eg, 'npz')
+        npz_path = jn(self.args.data_path, self.args.dataset_s2ag, 'npz')
         os.makedirs(npz_path, exist_ok=True)
-        if self.args.train_s2eg:
-            print('Total s2eg training data:\t\t{:>6} ({:.2f}%)'.format(
+        if self.args.train_s2ag:
+            print('Total s2ag training data:\t\t{:>6} ({:.2f}%)'.format(
                 self.num_train_samples, 100. * self.num_train_samples / self.num_total_samples))
-            print('Training s2eg with batch size:\t{:>6}'.format(self.args.batch_size))
-            train_file_name = jn(npz_path, 'train.npz')
-            if not os.path.exists(train_file_name):
-                self.save_cache('train', train_file_name)
-            self.load_cache('train', train_file_name)
-            print('Total s2eg validation data:\t\t{:>6} ({:.2f}%)'.format(
+            print('Training s2ag with batch size:\t{:>6}'.format(self.args.batch_size))
+            train_dir_name = jn(npz_path, 'train')
+            if not os.path.exists(train_dir_name):
+                self.save_cache('train', train_dir_name)
+            self.load_cache('train', train_dir_name)
+            print('Total s2ag validation data:\t\t{:>6} ({:.2f}%)'.format(
                 self.num_val_samples, 100. * self.num_val_samples / self.num_total_samples))
-            val_file_name = jn(npz_path, 'val.npz')
-            if not os.path.exists(val_file_name):
-                self.save_cache('val', val_file_name)
-            self.load_cache('val', val_file_name)
+            val_dir_name = jn(npz_path, 'val')
+            if not os.path.exists(val_dir_name):
+                self.save_cache('val', val_dir_name)
+            self.load_cache('val', val_dir_name)
         else:
             self.train_samples = None
             self.val_samples = None
 
-        print('Total s2eg testing data:\t\t{:>6} ({:.2f}%)'.format(
+        print('Total s2ag testing data:\t\t{:>6} ({:.2f}%)'.format(
             self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))
-        test_file_name = jn(npz_path, 'test.npz')
-        if not os.path.exists(test_file_name):
-            self.save_cache('test', test_file_name)
+        test_dir_name = jn(npz_path, 'test')
+        if not os.path.exists(test_dir_name):
+            self.save_cache('test', test_dir_name)
 
         self.lr_s2eg_gen = self.s2eg_config_args.learning_rate
         self.lr_s2eg_dis = self.s2eg_config_args.learning_rate * self.s2eg_config_args.discriminator_lr_weight
@@ -201,60 +201,97 @@ class Processor(object):
             lr=self.lr_s2eg_dis,
             betas=(0.5, 0.999))
 
-    def load_cache(self, part, file_name):
-        start_time = time.time()
+    def load_cache(self, part, dir_name, load_full=True):
         print('Loading {} cache'.format(part), end='')
-        npz = np.load(file_name, allow_pickle=True)
-        samples_dict = {'extended_word_seq': npz['extended_word_seq'],
-                        'vec_seq': npz['vec_seq'],
-                        'audio': npz['audio'],
-                        'audio_max': npz['audio_max'],
-                        'mfcc_features': npz['mfcc_features'].astype(np.float16),
-                        'vid_indices': npz['vid_indices']
-                        }
+        if load_full:
+            start_time = time.time()
+            npz = np.load(jn(dir_name, '../full', part + '.npz'), allow_pickle=True)
+            samples_dict = {'extended_word_seq': npz['extended_word_seq'],
+                            'vec_seq': npz['vec_seq'],
+                            'audio': npz['audio'],
+                            'audio_max': npz['audio_max'],
+                            'mfcc_features': npz['mfcc_features'].astype(np.float16),
+                            'vid_indices': npz['vid_indices']
+                            }
+            if part == 'train':
+                self.train_samples = samples_dict
+            elif part == 'val':
+                self.val_samples = samples_dict
+            elif part == 'test':
+                self.test_samples = samples_dict
+            print(' took {:>6} seconds.'.format(int(np.ceil(time.time() - start_time))))
+        else:
+            num_samples = self.num_train_samples if part == 'train' else (self.num_val_samples if part == 'val' else self.num_test_samples)
+            samples_dict = {'extended_word_seq': [],
+                            'vec_seq': [],
+                            'audio': [],
+                            'audio_max': [],
+                            'mfcc_features': [],
+                            'vid_indices': []}
+            for k in range(num_samples):
+                start_time = time.time()
+                npz = np.load(jn(dir_name, str(k).zfill(6) + '.npz'), allow_pickle=True)
+                samples_dict['extended_word_seq'].append(npz['extended_word_seq'])
+                samples_dict['vec_seq'].append(npz['vec_seq'])
+                samples_dict['audio'].append(npz['audio'])
+                samples_dict['audio_max'].append(npz['audio_max'])
+                samples_dict['mfcc_features'].append(npz['mfcc_features'].astype(np.float16))
+                samples_dict['vid_indices'].append(npz['vid_indices'])
+                time_taken = time.time() - start_time
+                time_remaining = np.ceil((num_samples - k - 1) * time_taken)
+                print('\rLoading {} cache {:>6}/{}, estimated time remaining {}.'.format(part, k + 1, num_samples,
+                                                                                        str(datetime.timedelta(seconds=time_remaining))), end='')
+            for dict_key in samples_dict.keys():
+                samples_dict[dict_key] = np.stack(samples_dict[dict_key])
+        
         if part == 'train':
             self.train_samples = samples_dict
         elif part == 'val':
             self.val_samples = samples_dict
         elif part == 'test':
             self.test_samples = samples_dict
-        print(' took {:>6} seconds.'.format(int(np.ceil(time.time() - start_time))))
+        print(' Completed.')
 
-    def save_cache(self, part, file_name):
-        data_s2eg = self.data_loader['{}_data_s2eg'.format(part)]
-        num_samples = self.num_train_samples if part == 'train' else\
-            (self.num_val_samples if part == 'val' else self.num_test_samples)
+    def save_cache(self, part, dir_name):
+        data_s2ag = self.data_loader['{}_data_s2ag'.format(part)]
+        num_samples = self.num_train_samples if part == 'train' else (self.num_val_samples if part == 'val' else self.num_test_samples)
+        speaker_model = self.train_speaker_model if part == 'train' else (self.val_speaker_model if part == 'val' else self.test_speaker_model)
 
         extended_word_seq_all = np.zeros((num_samples, self.time_steps), dtype=np.int64)
         vec_seq_all = np.zeros((num_samples, self.time_steps, self.pose_dim))
         audio_all = np.zeros((num_samples, self.audio_length), dtype=np.int16)
         audio_max_all = np.zeros(num_samples)
-        mfcc_features_all = np.zeros((num_samples, 13, self.mfcc_length))
-        # vid_indices_all = np.zeros(num_samples, dtype=np.int64)
+        mfcc_features_all = np.zeros((num_samples, self.num_mfcc, self.mfcc_length))
+        vid_indices_all = np.zeros(num_samples, dtype=np.int64)
         print('Caching {} data {:>6}/{}.'.format(part, 0, num_samples), end='')
         for k in range(num_samples):
-            with data_s2eg.lmdb_env.begin(write=False) as txn:
+            with data_s2ag.lmdb_env.begin(write=False) as txn:
                 key = '{:010}'.format(k).encode('ascii')
                 sample = txn.get(key)
                 sample = pyarrow.deserialize(sample)
                 word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
+            # with data_s2ag.lmdb_env.begin(write=False) as txn:
+            #     key = '{:010}'.format(k).encode('ascii')
+            #     sample = txn.get(key)
+            #     sample = pyarrow.deserialize(sample)
+            #     word_seq, pose_seq, vec_seq, audio, spectrogram, mfcc_features, aux_info = sample
 
             duration = aux_info['end_time'] - aux_info['start_time']
             audio_max_all[k] = np.max(np.abs(audio))
             do_clipping = True
 
             if do_clipping:
-                sample_end_time = aux_info['start_time'] + duration * data_s2eg.n_poses / vec_seq.shape[0]
+                sample_end_time = aux_info['start_time'] + duration * data_s2ag.n_poses / vec_seq.shape[0]
                 audio = make_audio_fixed_length(audio, self.audio_length)
                 mfcc_features = mfcc_features[:, 0:self.mfcc_length]
-                vec_seq = vec_seq[0:data_s2eg.n_poses]
+                vec_seq = vec_seq[0:data_s2ag.n_poses]
             else:
                 sample_end_time = None
 
             # to tensors
-            word_seq_tensor = Processor.words_to_tensor(data_s2eg.lang_model, word_seq, sample_end_time)
-            extended_word_seq = Processor.extend_word_seq(data_s2eg.n_poses, data_s2eg.lang_model,
-                                                          data_s2eg.remove_word_timing, word_seq,
+            word_seq_tensor = Processor.words_to_tensor(data_s2ag.lang_model, word_seq, sample_end_time)
+            extended_word_seq = Processor.extend_word_seq(data_s2ag.n_poses, data_s2ag.lang_model,
+                                                          data_s2ag.remove_word_timing, word_seq,
                                                           aux_info, sample_end_time).detach().cpu().numpy()
             vec_seq = torch.from_numpy(vec_seq).reshape((vec_seq.shape[0], -1)).float().detach().cpu().numpy()
 
@@ -262,14 +299,25 @@ class Processor(object):
             vec_seq_all[k] = vec_seq
             audio_all[k] = np.int16(audio / audio_max_all[k] * 32767)
             mfcc_features_all[k] = mfcc_features
-
+            vid_indices_all[k] = speaker_model.word2index[aux_info['vid']]
+            
+            np.savez_compressed(jn(dir_name, part, str(k).zfill(6) + '.npz'),
+                                extended_word_seq=extended_word_seq,
+                                vec_seq=vec_seq,
+                                audio=np.int16(audio / audio_max_all[k] * 32767),
+                                audio_max=audio_max_all[k],
+                                mfcc_features=mfcc_features,
+                                vid_indices=vid_indices_all[k])
             print('\rCaching {} data {:>6}/{}.'.format(part, k + 1, num_samples), end='')
 
-        print('\t Storing cache', end='')
-        np.savez_compressed(file_name,
+        print('\t Storing full cache', end='')
+        full_cache_path = jn(dir_name, '../full')
+        os.makedirs(full_cache_path, exist_ok=True)
+        np.savez_compressed(jn(full_cache_path, part + '.npz'),
                             extended_word_seq=extended_word_seq_all,
                             vec_seq=vec_seq_all, audio=audio_all, audio_max=audio_max_all,
-                            mfcc_features=mfcc_features_all)
+                            mfcc_features=mfcc_features_all,
+                            vid_indices=vid_indices_all)
         print(' done.')
 
     def process_data(self, data, poses, quat, trans, affs):

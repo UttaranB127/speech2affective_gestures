@@ -552,7 +552,6 @@ def save_as_npz(dataset, part_name):
 
 
 def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
-
     # load clips and make gestures
     mean_dir_vec = np.array(config_args.mean_dir_vec).reshape(-1, 3)
     train_dataset = TedDBParams(config_args.train_data_path[0],

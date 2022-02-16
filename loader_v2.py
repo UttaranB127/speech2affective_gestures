@@ -436,6 +436,21 @@ def load_iemocap_data(data_dir, dataset, dimensional_min=-0., dimensional_max=6.
         max_all, min_all
 
 
+class TedDBParamsMinimal:
+    def __init__(self, lmdb_dir, speaker_model=None):
+        self.lmdb_dir = lmdb_dir
+        # make a speaker model
+        if speaker_model is None or speaker_model == 0:
+            precomputed_model = self.lmdb_dir + '_s2ag_speaker_model.pkl'
+            if not os.path.exists(precomputed_model):
+                self._make_speaker_model(self.lmdb_dir, precomputed_model)
+            else:
+                with open(precomputed_model, 'rb') as f:
+                    self.speaker_model = pickle.load(f)
+        else:
+            self.speaker_model = speaker_model
+
+
 class TedDBParams:
     def __init__(self, lmdb_dir, n_poses, subdivision_stride, pose_resampling_fps,
                  mean_pose, mean_dir_vec, num_mfcc, speaker_model=None, remove_word_timing=False):
@@ -454,15 +469,15 @@ class TedDBParams:
 
         self.lang_model = None
 
-        print('Reading data \'{}\'...'.format(lmdb_dir))
-        preloaded_dir = lmdb_dir + '_s2ag_v2_cache_mfcc_{}'.format(self.num_mfcc)
+        print('Reading data \'{}\'...'.format(self.lmdb_dir))
+        preloaded_dir = self.lmdb_dir + '_s2ag_v2_cache_mfcc_{}'.format(self.num_mfcc)
         if not os.path.exists(preloaded_dir):
             print('Creating the dataset cache...')
             assert mean_dir_vec is not None
             if mean_dir_vec.shape[-1] != 3:
                 mean_dir_vec = mean_dir_vec.reshape(mean_dir_vec.shape[:-1] + (-1, 3))
             n_poses_extended = int(round(n_poses * 1.25))  # some margin
-            data_sampler = DataPreprocessor(lmdb_dir, preloaded_dir, n_poses_extended, subdivision_stride,
+            data_sampler = DataPreprocessor(self.lmdb_dir, preloaded_dir, n_poses_extended, subdivision_stride,
                                             pose_resampling_fps, mean_pose, mean_dir_vec, self.num_mfcc)
             data_sampler.run()
         else:
@@ -475,9 +490,9 @@ class TedDBParams:
 
         # make a speaker model
         if speaker_model is None or speaker_model == 0:
-            precomputed_model = lmdb_dir + '_s2ag_speaker_model.pkl'
+            precomputed_model = self.lmdb_dir + '_s2ag_speaker_model.pkl'
             if not os.path.exists(precomputed_model):
-                self._make_speaker_model(lmdb_dir, precomputed_model)
+                self._make_speaker_model(self.lmdb_dir, precomputed_model)
             else:
                 with open(precomputed_model, 'rb') as f:
                     self.speaker_model = pickle.load(f)
@@ -551,28 +566,32 @@ def save_as_npz(dataset, part_name):
     print()
 
 
-def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
+def load_ted_db_data(_path, config_args, load_train_val, ted_db_npz_already_processed=True):
     # load clips and make gestures
     mean_dir_vec = np.array(config_args.mean_dir_vec).reshape(-1, 3)
-    train_dataset = TedDBParams(config_args.train_data_path[0],
-                                n_poses=config_args.n_poses,
-                                subdivision_stride=config_args.subdivision_stride,
-                                pose_resampling_fps=config_args.motion_resampling_framerate,
-                                mean_dir_vec=mean_dir_vec,
-                                mean_pose=config_args.mean_pose,
-                                num_mfcc=config_args.num_mfcc,
-                                remove_word_timing=(config_args.input_context == 'text')
-                            )
+    if load_train_val:
+        train_dataset = TedDBParams(config_args.train_data_path[0],
+                                    n_poses=config_args.n_poses,
+                                    subdivision_stride=config_args.subdivision_stride,
+                                    pose_resampling_fps=config_args.motion_resampling_framerate,
+                                    mean_dir_vec=mean_dir_vec,
+                                    mean_pose=config_args.mean_pose,
+                                    num_mfcc=config_args.num_mfcc,
+                                    remove_word_timing=(config_args.input_context == 'text')
+                                   )
 
-    val_dataset = TedDBParams(config_args.val_data_path[0],
-                            n_poses=config_args.n_poses,
-                            subdivision_stride=config_args.subdivision_stride,
-                            pose_resampling_fps=config_args.motion_resampling_framerate,
-                            mean_dir_vec=mean_dir_vec,
-                            mean_pose=config_args.mean_pose,
-                            num_mfcc=config_args.num_mfcc,
-                            remove_word_timing=(config_args.input_context == 'text')
-                            )
+        val_dataset = TedDBParams(config_args.val_data_path[0],
+                                  n_poses=config_args.n_poses,
+                                  subdivision_stride=config_args.subdivision_stride,
+                                  pose_resampling_fps=config_args.motion_resampling_framerate,
+                                  mean_dir_vec=mean_dir_vec,
+                                  mean_pose=config_args.mean_pose,
+                                  num_mfcc=config_args.num_mfcc,
+                                  remove_word_timing=(config_args.input_context == 'text')
+                                 )
+    else:
+        train_dataset = TedDBParamsMinimal(config_args.train_data_path[0])
+        val_dataset = TedDBParamsMinimal(config_args.val_data_path[0])
 
     test_dataset = TedDBParams(config_args.test_data_path[0],
                                n_poses=config_args.n_poses,
@@ -590,13 +609,15 @@ def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
     lang_model = build_vocab('words', [train_dataset, val_dataset, test_dataset],
                              vocab_cache_path, config_args.wordembed_path,
                              config_args.wordembed_dim)
-    train_dataset.set_lang_model(lang_model)
-    val_dataset.set_lang_model(lang_model)
+    if load_train_val:
+        train_dataset.set_lang_model(lang_model)
+        val_dataset.set_lang_model(lang_model)
     test_dataset.set_lang_model(lang_model)
 
     if not ted_db_npz_already_processed:
-        save_as_npz(train_dataset, 'train')
-        save_as_npz(train_dataset, 'val')
+        if load_train_val:
+            save_as_npz(train_dataset, 'train')
+            save_as_npz(train_dataset, 'val')
         save_as_npz(train_dataset, 'test')
 
     return train_dataset, val_dataset, test_dataset

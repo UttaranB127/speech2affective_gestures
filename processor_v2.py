@@ -112,18 +112,26 @@ class Processor(object):
         self.coords = coords
         self.audio_sr = audio_sr
 
-        self.time_steps = self.data_loader['train_data_s2ag'].n_poses
-        self.audio_length = self.data_loader['train_data_s2ag'].expected_audio_length
-        self.spectrogram_length = self.data_loader['train_data_s2ag'].expected_spectrogram_length
+        if self.args.train_s2ag:
+            self.time_steps = self.data_loader['train_data_s2ag'].n_poses
+            self.audio_length = self.data_loader['train_data_s2ag'].expected_audio_length
+            self.spectrogram_length = self.data_loader['train_data_s2ag'].expected_spectrogram_length
+            self.num_mfcc = self.data_loader['train_data_s2ag'].num_mfcc_combined
+            self.lang_model = self.data_loader['train_data_s2ag'].lang_model
+        else:
+            self.time_steps = self.data_loader['test_data_s2ag'].n_poses
+            self.audio_length = self.data_loader['test_data_s2ag'].expected_audio_length
+            self.spectrogram_length = self.data_loader['test_data_s2ag'].expected_spectrogram_length
+            self.num_mfcc = self.data_loader['test_data_s2ag'].num_mfcc_combined
+            self.lang_model = self.data_loader['test_data_s2ag'].lang_model
         self.mfcc_length = int(np.ceil(self.audio_length / 512))
-        self.num_mfcc = self.data_loader['train_data_s2ag'].num_mfcc_combined
 
         self.best_s2ag_loss = np.inf
         self.best_s2ag_loss_epoch = None
         self.s2ag_loss_updated = False
         self.min_train_epochs = min_train_epochs
         self.zfill = zfill
-        self.lang_model = self.data_loader['train_data_s2ag'].lang_model
+
         self.train_speaker_model = self.data_loader['train_data_s2ag'].speaker_model
         self.val_speaker_model = self.data_loader['val_data_s2ag'].speaker_model
         self.test_speaker_model = self.data_loader['test_data_s2ag'].speaker_model
@@ -1234,8 +1242,8 @@ class Processor(object):
                                      'constant')
             in_mfcc = torch.from_numpy(
                 cmn.get_mfcc_features(in_audio_np, sr=sample_rate,
-                                      num_mfcc=self.data_loader['train_data_s2ag'].num_mfcc)). \
-                unsqueeze(0).to(self.device).float()
+                                      num_mfcc=self.data_loader['train_data_s2ag'].num_mfcc if self.args.train_s2ag else
+                                               self.data_loader['test_data_s2ag'].num_mfcc)).unsqueeze(0).to(self.device).float()
             in_audio = torch.from_numpy(in_audio_np).unsqueeze(0).to(self.device).float()
 
             # prepare text input

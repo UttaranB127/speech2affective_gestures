@@ -117,7 +117,7 @@ os.makedirs(args.video_save_path, exist_ok=True)
 args.quantitative_save_path = jn(base_path, 'outputs', 'quantitative')
 os.makedirs(args.quantitative_save_path, exist_ok=True)
 
-train_data_ted, val_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2ag_config_args)
+train_data_ted, val_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2ag_config_args, args.train_s2ag)
 
 data_loader = dict(train_data_s2ag=train_data_ted, val_data_s2ag=val_data_ted, test_data_s2ag=test_data_ted)
 pose_dim = 27

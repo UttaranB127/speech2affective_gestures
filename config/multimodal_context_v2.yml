@@ -35,7 +35,7 @@ loss_warmup: 0
 loss_kld_weight: 0.1
 loss_reg_weight: 0.05
 
-# eval params
+# val params
 val_net_path: /mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures/outputs/train_h36m_gesture_autoencoder/gesture_autoencoder_checkpoint_best.bin
 
 # dataset params

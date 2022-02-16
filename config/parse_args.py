@@ -13,9 +13,8 @@ def str2bool(v):
         raise configargparse.ArgumentTypeError('Boolean value expected.')
 
 
-def parse_args():
-    parser = configargparse.ArgParser()
-    parser.add('-c', '--config', required=True, is_config_file=True, help='Config file path')
+def parse_args(config_file):
+    parser = configargparse.ArgParser(default_config_files=[config_file])
     parser.add("--name", type=str, default="main")
     parser.add("--train_data_path", action="append")
     parser.add("--val_data_path", action="append")
@@ -66,5 +65,5 @@ def parse_args():
     # eval
     parser.add("--val_net_path", type=str, default='')
 
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
     return args

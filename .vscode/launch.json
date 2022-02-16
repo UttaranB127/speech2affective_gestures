@@ -10,7 +10,8 @@
             "request": "launch",
             "program": "main_v2.py",
             "console": "integratedTerminal",
-            "args": ["--config", "config/multimodal_context_v2.yml"]
+            "args": ["--config", "config/multimodal_context_v2.yml",
+                     "--train-s2ag", "False"]
         }
     ]
 }

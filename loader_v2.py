@@ -562,17 +562,17 @@ def load_ted_db_data(_path, config_args, ted_db_npz_already_processed=True):
                                 mean_pose=config_args.mean_pose,
                                 num_mfcc=config_args.num_mfcc,
                                 remove_word_timing=(config_args.input_context == 'text')
-                               )
+                            )
 
     val_dataset = TedDBParams(config_args.val_data_path[0],
-                              n_poses=config_args.n_poses,
-                              subdivision_stride=config_args.subdivision_stride,
-                              pose_resampling_fps=config_args.motion_resampling_framerate,
-                              mean_dir_vec=mean_dir_vec,
-                              mean_pose=config_args.mean_pose,
-                              num_mfcc=config_args.num_mfcc,
-                              remove_word_timing=(config_args.input_context == 'text')
-                             )
+                            n_poses=config_args.n_poses,
+                            subdivision_stride=config_args.subdivision_stride,
+                            pose_resampling_fps=config_args.motion_resampling_framerate,
+                            mean_dir_vec=mean_dir_vec,
+                            mean_pose=config_args.mean_pose,
+                            num_mfcc=config_args.num_mfcc,
+                            remove_word_timing=(config_args.input_context == 'text')
+                            )
 
     test_dataset = TedDBParams(config_args.test_data_path[0],
                                n_poses=config_args.n_poses,

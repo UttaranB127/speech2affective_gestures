@@ -47,11 +47,11 @@ parser.add_argument('-dap', '--dataset-s2ag-already-processed',
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
-parser.add_argument('--train-s2ag', type=bool, default=True, metavar='T-s2ag',
+parser.add_argument('--train-s2ag', type=str2bool, default=True, metavar='T-s2ag',
                     help='train the s2ag model (default: False)')
-parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
+parser.add_argument('--use-multiple-gpus', type=str2bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
-parser.add_argument('--s2ag-load-last-best', type=bool, default=True, metavar='s2ag-LB',
+parser.add_argument('--s2ag-load-last-best', type=str2bool, default=True, metavar='s2ag-LB',
                     help='load the most recent best model for s2ag (default: True)')
 parser.add_argument('--batch-size', type=int, default=512, metavar='B',
                     help='input batch size for training (default: 32)')
@@ -107,7 +107,7 @@ args = parser.parse_args()
 args.data_path = data_path
 randomized = False
 
-s2ag_config_args = parse_args()
+s2ag_config_args = parse_args(args.config)
 
 args.work_dir_s2ag = jn(models_s2ag_path, args.dataset_s2ag)
 os.makedirs(args.work_dir_s2ag, exist_ok=True)

@@ -171,13 +171,14 @@ class Processor(object):
             self.s2ag_generator.to(self.device)
             self.s2ag_discriminator.to(self.device)
 
-        self.num_train_samples = self.data_loader['train_data_s2ag'].n_samples
-        self.num_val_samples = self.data_loader['val_data_s2ag'].n_samples
-        self.num_test_samples = self.data_loader['test_data_s2ag'].n_samples
-        self.num_total_samples = self.num_train_samples + self.num_val_samples + self.num_test_samples
         npz_path = jn(self.args.data_path, self.args.dataset_s2ag, 'npz')
         os.makedirs(npz_path, exist_ok=True)
+        self.num_test_samples = self.data_loader['test_data_s2ag'].n_samples
+
         if self.args.train_s2ag:
+            self.num_train_samples = self.data_loader['train_data_s2ag'].n_samples
+            self.num_val_samples = self.data_loader['val_data_s2ag'].n_samples
+            self.num_total_samples = self.num_train_samples + self.num_val_samples + self.num_test_samples
             print('Total s2ag training data:\t\t{:>6} ({:.2f}%)'.format(
                 self.num_train_samples, 100. * self.num_train_samples / self.num_total_samples))
             print('Training s2ag with batch size:\t{:>6}'.format(self.args.batch_size))
@@ -194,6 +195,7 @@ class Processor(object):
         else:
             self.train_samples = None
             self.val_samples = None
+            self.num_total_samples = self.num_test_samples
 
         print('Total s2ag testing data:\t\t{:>6} ({:.2f}%)'.format(
             self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))

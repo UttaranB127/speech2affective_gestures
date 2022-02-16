@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
 data_path = j(base_path, '../../data')
 
-models_s2eg_path = j(base_path, 'models', 's2eg_v2_abl_audio')
+models_s2ag_path = j(base_path, 'models', 's2ag_v2_abl_audio')
 
 
 def str2bool(v):
@@ -36,37 +36,37 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
-parser.add_argument('--dataset-s2eg', type=str, default='ted_db', metavar='D-S2G',
+parser.add_argument('--dataset-s2ag', type=str, default='ted_db', metavar='D-S2G',
                     help='dataset to train and validate speech to emotive gestures (default: ted)')
-parser.add_argument('-dap', '--dataset-s2eg-already-processed',
+parser.add_argument('-dap', '--dataset-s2ag-already-processed',
                     help='Optional. Set to True if dataset has already been processed.' +
                          'If not, or if you are not sure, set it to False.',
                     type=str2bool, default=True)
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
-parser.add_argument('--train-s2eg', type=bool, default=True, metavar='T-S2EG',
-                    help='train the s2eg model (default: True)')
-parser.add_argument('--use-multiple-gpus', type=bool, default=True, metavar='T',
+parser.add_argument('--train-s2ag', type=str2bool, default=True, metavar='T-s2ag',
+                    help='train the s2ag model (default: True)')
+parser.add_argument('--use-multiple-gpus', type=str2bool, default=True, metavar='T',
                     help='use multiple GPUs if available (default: True)')
-parser.add_argument('--s2eg-load-last-best', type=bool, default=True, metavar='S2EG-LB',
-                    help='load the most recent best model for s2eg (default: True)')
+parser.add_argument('--s2ag-load-last-best', type=str2bool, default=True, metavar='s2ag-LB',
+                    help='load the most recent best model for s2ag (default: True)')
 parser.add_argument('--batch-size', type=int, default=512, metavar='B',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--num-worker', type=int, default=4, metavar='W',
                     help='number of threads? (default: 4)')
-parser.add_argument('--s2eg-start-epoch', type=int, default=0, metavar='S2EG-SE',
-                    help='starting epoch of training of s2eg (default: 0)')
-parser.add_argument('--s2eg-num-epoch', type=int, default=500, metavar='S2EG-NE',
-                    help='number of epochs to train s2eg (default: 1000)')
+parser.add_argument('--s2ag-start-epoch', type=int, default=0, metavar='s2ag-SE',
+                    help='starting epoch of training of s2ag (default: 0)')
+parser.add_argument('--s2ag-num-epoch', type=int, default=500, metavar='s2ag-NE',
+                    help='number of epochs to train s2ag (default: 1000)')
 # parser.add_argument('--window-length', type=int, default=1, metavar='WL',
 #                     help='max number of past time steps to take as input to transformer decoder (default: 60)')
 parser.add_argument('--base-tr', type=float, default=1., metavar='TR',
                     help='base teacher rate (default: 1.0)')
 parser.add_argument('--step', type=list, default=0.05 * np.arange(20), metavar='[S]',
                     help='fraction of steps when learning rate will be decreased (default: [0.5, 0.75, 0.875])')
-parser.add_argument('--lr-s2eg-decay', type=float, default=0.999, metavar='LRD-S2EG',
-                    help='learning rate decay for s2eg (default: 0.999)')
+parser.add_argument('--lr-s2ag-decay', type=float, default=0.999, metavar='LRD-s2ag',
+                    help='learning rate decay for s2ag (default: 0.999)')
 parser.add_argument('--gradient-clip', type=float, default=0.1, metavar='GC',
                     help='gradient clip threshold (default: 0.1)')
 parser.add_argument('--nesterov', action='store_true', default=True,
@@ -105,30 +105,30 @@ args = parser.parse_args()
 args.data_path = data_path
 randomized = False
 
-s2eg_config_args = parse_args()
+s2ag_config_args = parse_args(args.config)
 
-args.work_dir_s2eg = j(models_s2eg_path, args.dataset_s2eg)
-os.makedirs(args.work_dir_s2eg, exist_ok=True)
+args.work_dir_s2ag = j(models_s2ag_path, args.dataset_s2ag)
+os.makedirs(args.work_dir_s2ag, exist_ok=True)
 
 args.video_save_path = j(base_path, 'outputs', 'videos_trimodal_style')
 os.makedirs(args.video_save_path, exist_ok=True)
 args.quantitative_save_path = j(base_path, 'outputs', 'quantitative')
 os.makedirs(args.quantitative_save_path, exist_ok=True)
 
-train_data_ted, val_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2eg_config_args)
+train_data_ted, val_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2ag_config_args)
 
-data_loader = dict(train_data_s2eg=train_data_ted, val_data_s2eg=val_data_ted, test_data_s2eg=test_data_ted)
+data_loader = dict(train_data_s2ag=train_data_ted, val_data_s2ag=val_data_ted, test_data_s2ag=test_data_ted)
 pose_dim = 27
 coords = 3
 audio_sr = 16000
 
-pr = processor.Processor(args, s2eg_config_args, data_loader, pose_dim, coords, audio_sr)
+pr = processor.Processor(args, s2ag_config_args, data_loader, pose_dim, coords, audio_sr)
 
-if args.train_s2eg:
+if args.train_s2ag:
     pr.train()
 
-pr.generate_gestures(samples_to_generate=data_loader['test_data_s2eg'].n_samples,
-                     randomized=randomized, ser_epoch='best', s2eg_epoch=227)
+pr.generate_gestures(samples_to_generate=data_loader['test_data_s2ag'].n_samples,
+                     randomized=randomized, ser_epoch='best', s2ag_epoch=227)
 
 # pr.generate_gestures_by_env_file(j(data_path, 'ted_db/lmdb_test'), [5, 12],
-#                                  randomized=randomized, ser_epoch='best', s2eg_epoch=142)
+#                                  randomized=randomized, ser_epoch='best', s2ag_epoch=142)

@@ -1064,7 +1064,7 @@ class Processor(object):
             if self.s2ag_loss_updated or (epoch % self.args.save_interval == 0 and epoch > self.min_train_epochs):
                 torch.save({'gen_model_dict': self.s2ag_generator.state_dict(),
                             'dis_model_dict': self.s2ag_discriminator.state_dict()},
-                           jn(self.args.work_dir_s2ag, 'epoch_{}_loss_{:.4f}_model.pth.tar'.
+                           jn(self.args.work_dir_s2ag, 'epoch_{:06d}_loss_{:.4f}_model.pth.tar'.
                               format(epoch, self.epoch_info['mean_s2ag_loss'])))
 
     def generate_gestures(self, samples_to_generate=10, randomized=True, load_saved_model=True,

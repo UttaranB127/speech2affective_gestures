@@ -1142,7 +1142,7 @@ class Processor(object):
 
     def render_clip(self, data_params, vid_name, sample_idx, samples_to_generate,
                     clip_poses, clip_audio, sample_rate, clip_words, clip_time,
-                    clip_idx=0, speaker_vid_idx=0, check_duration=True,
+                    clip_idx=0, unit_time=None, speaker_vid_idx=0, check_duration=True,
                     fade_out=False, make_video=False, save_pkl=False):
         start_time = time.time()
         mean_dir_vec = np.squeeze(np.array(self.s2ag_config_args.mean_dir_vec))
@@ -1193,8 +1193,9 @@ class Processor(object):
         spectrogram = None
 
         # divide into synthesize units and do synthesize
-        unit_time = self.s2ag_config_args.n_poses / \
-            self.s2ag_config_args.motion_resampling_framerate
+        if unit_time is None:
+            unit_time = self.s2ag_config_args.n_poses / \
+                self.s2ag_config_args.motion_resampling_framerate
         stride_time = (self.s2ag_config_args.n_poses - self.s2ag_config_args.n_pre_poses) / \
             self.s2ag_config_args.motion_resampling_framerate
         if clip_length < unit_time:

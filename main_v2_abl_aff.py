@@ -122,7 +122,7 @@ pose_dim = 27
 coords = 3
 audio_sr = 16000
 
-pr = processor.Processor(args, s2ag_config_args, data_loader, pose_dim, coords, audio_sr)
+pr = processor.Processor(base_path, args, s2ag_config_args, data_loader, pose_dim, coords, audio_sr)
 
 if args.train_s2ag:
     pr.train()

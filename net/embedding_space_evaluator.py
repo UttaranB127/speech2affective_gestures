@@ -12,12 +12,8 @@ from net.embedding_net import EmbeddingNet
 warnings.filterwarnings("ignore", category=RuntimeWarning)  # ignore warnings
 
 
-# base_path = os.path.dirname(os.path.realpath(__file__))
-base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
-
-
 class EmbeddingSpaceEvaluator:
-    def __init__(self, args, pose_dim, lang_model, device):
+    def __init__(self, base_path, args, pose_dim, lang_model, device):
         self.n_pre_poses = args.n_pre_poses
 
         # init embed net

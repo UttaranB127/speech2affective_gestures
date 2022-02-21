@@ -27,35 +27,31 @@ from utils.vocab import Vocab
 from utils.vocab_utils import build_vocab
 
 
-# base_path = os.path.dirname(os.path.realpath(__file__))
-base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
+# Not using NRC-VAD
+# nrc_vad_lexicon_file = j(base_path, '../../data/NRC-VAD-Lexicon-Aug2018Release/NRC-VAD-Lexicon.txt')
+# nrc_vad_lexicon = {}
+# with open(nrc_vad_lexicon_file, 'r') as nf:
+#     heading = nf.readline()
+#     lines = nf.readlines()
+#     for line in lines:
+#         line_split = line.split('\t')
+#         lexeme = line_split[0]
+#         v = float(line_split[1])
+#         a = float(line_split[2])
+#         d = float(line_split[3].split('\n')[0])
+#         nrc_vad_lexicon[lexeme] = np.array([v, a, d])
+# porter_stemmer = PorterStemmer()
+# def get_vad(lexeme_raw):
+#     lexeme_lower = lexeme_raw.lower()
+#     lexeme_stemmed = porter_stemmer.stem(lexeme_lower)
+#     if lexeme_lower in nrc_vad_lexicon.keys():
+#         return nrc_vad_lexicon[lexeme_lower]
+#     if lexeme_stemmed in nrc_vad_lexicon.keys():
+#         return nrc_vad_lexicon[lexeme_stemmed]
+#     return np.zeros(3)
 
-nrc_vad_lexicon_file = j(base_path, '../../data/NRC-VAD-Lexicon-Aug2018Release/NRC-VAD-Lexicon.txt')
-nrc_vad_lexicon = {}
-
-with open(nrc_vad_lexicon_file, 'r') as nf:
-    heading = nf.readline()
-    lines = nf.readlines()
-    for line in lines:
-        line_split = line.split('\t')
-        lexeme = line_split[0]
-        v = float(line_split[1])
-        a = float(line_split[2])
-        d = float(line_split[3].split('\n')[0])
-        nrc_vad_lexicon[lexeme] = np.array([v, a, d])
-porter_stemmer = PorterStemmer()
 
 tts_engine = pyttsx3.init()
-
-
-def get_vad(lexeme_raw):
-    lexeme_lower = lexeme_raw.lower()
-    lexeme_stemmed = porter_stemmer.stem(lexeme_lower)
-    if lexeme_lower in nrc_vad_lexicon.keys():
-        return nrc_vad_lexicon[lexeme_lower]
-    if lexeme_stemmed in nrc_vad_lexicon.keys():
-        return nrc_vad_lexicon[lexeme_stemmed]
-    return np.zeros(3)
 
 
 def record_and_load_audio(audio_file, text, rate, trimmed=False):

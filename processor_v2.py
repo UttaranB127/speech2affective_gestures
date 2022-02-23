@@ -1201,7 +1201,7 @@ class Processor(object):
         if clip_length < unit_time:
             num_subdivisions = 1
         else:
-            num_subdivisions = math.ceil((clip_length - unit_time) / stride_time)
+            num_subdivisions = math.ceil((clip_length - unit_time) / stride_time) + 1
         spectrogram_sample_length = int(round(unit_time * sample_rate / 512))
         audio_sample_length = int(unit_time * sample_rate)
         end_padding_duration = 0
@@ -1217,15 +1217,18 @@ class Processor(object):
 
         print('Sample {} of {}'.format(sample_idx + 1, samples_to_generate))
         print('Subdivisions\t|\tUnit Time\t|\tClip Length\t|\tStride Time\t|\tAudio Sample Length')
-        print('{}\t\t\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{:.4f}\t\t|\t{}'.
+        print('{:>12d}\t|\t{:>9.4f}\t|\t{:>11.4f}\t|\t{:>11.4f}\t|\t{:>19d}'.
               format(num_subdivisions, unit_time, clip_length,
                      stride_time, audio_sample_length))
 
         out_dir_vec_trimodal = None
         out_dir_vec = None
         for sub_div_idx in range(0, num_subdivisions):
-            sub_div_start_time = sub_div_idx * stride_time
-            sub_div_end_time = sub_div_start_time + unit_time
+            sub_div_start_time = min(sub_div_idx * stride_time, clip_length)
+            sub_div_end_time = min(sub_div_start_time + unit_time, clip_length)
+
+            if sub_div_start_time >= sub_div_end_time:
+                continue
 
             # prepare spectrogram input
             in_spec = None

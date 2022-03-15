@@ -1301,8 +1301,8 @@ class Processor(object):
                 # delete last 4 frames
                 out_list_trimodal[-1] = out_list_trimodal[-1][:-self.s2ag_config_args.n_pre_poses]
 
-                for j in range(len(last_poses)):
-                    n = len(last_poses)
+                n = len(last_poses)
+                for j in range(n):
                     prev_pose = last_poses[j]
                     next_pose = out_seq_trimodal[j]
                     out_seq_trimodal[j] = prev_pose * (n - j) / (n + 1) + next_pose * (j + 1) / (n + 1)
@@ -1314,8 +1314,8 @@ class Processor(object):
                 # delete last 4 frames
                 out_list[-1] = out_list[-1][:-self.s2ag_config_args.n_pre_poses]
 
-                for j in range(len(last_poses)):
-                    n = len(last_poses)
+                n = len(last_poses)
+                for j in range(n):
                     prev_pose = last_poses[j]
                     next_pose = out_seq[j]
                     out_seq[j] = prev_pose * (n - j) / (n + 1) + next_pose * (j + 1) / (n + 1)
@@ -1352,12 +1352,21 @@ class Processor(object):
                 np.zeros(self.pose_dim)  # fade out to mean poses
 
             # interpolation
+            y_target = target_dir_vec[start_frame:end_frame]
             y_trimodal = out_dir_vec_trimodal[start_frame:end_frame]
             y = out_dir_vec[start_frame:end_frame]
             x = np.array(range(0, y.shape[0]))
             w = np.ones(len(y))
             w[0] = 5
             w[-1] = 5
+
+            co_effs_target = np.polyfit(x, y_target, 2, w=w)
+            fit_functions_target = [np.poly1d(co_effs_target[:, k])
+                                    for k in range(0, y_target.shape[1])]
+            interpolated_y_target = [fit_functions_target[k](x)
+                                     for k in range(0, y_target.shape[1])]
+            # (num_frames x dims)
+            interpolated_y_target = np.transpose(np.asarray(interpolated_y_target))
 
             co_effs_trimodal = np.polyfit(x, y_trimodal, 2, w=w)
             fit_functions_trimodal = [np.poly1d(co_effs_trimodal[:, k])
@@ -1373,6 +1382,7 @@ class Processor(object):
             # (num_frames x dims)
             interpolated_y = np.transpose(np.asarray(interpolated_y))
 
+            target_dir_vec[start_frame:end_frame] = interpolated_y_target
             out_dir_vec_trimodal[start_frame:end_frame] = interpolated_y_trimodal
             out_dir_vec[start_frame:end_frame] = interpolated_y
 

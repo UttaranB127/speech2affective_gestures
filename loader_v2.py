@@ -445,6 +445,26 @@ class TedDBParamsMinimal:
                     self.speaker_model = pickle.load(f)
         else:
             self.speaker_model = speaker_model
+    
+    def _make_speaker_model(self, lmdb_dir, cache_path):
+        print('  building a speaker model...')
+        speaker_model = Vocab('vid', insert_default_tokens=False)
+
+        lmdb_env = lmdb.open(lmdb_dir, readonly=True, lock=False)
+        txn = lmdb_env.begin(write=False)
+        cursor = txn.cursor()
+        for key, value in cursor:
+            video = pyarrow.deserialize(value)
+            vid = video['vid']
+            speaker_model.index_word(vid)
+
+        lmdb_env.close()
+        print('    indexed %d videos' % speaker_model.n_words)
+        self.speaker_model = speaker_model
+
+        # cache
+        with open(cache_path, 'wb') as f:
+            pickle.dump(self.speaker_model, f)
 
 
 class TedDBParams:

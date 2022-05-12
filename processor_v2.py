@@ -1436,7 +1436,7 @@ class Processor(object):
         return clip_poses_resampled, out_poses_trimodal, out_poses
 
     def generate_gestures_by_dataset(self, dataset, data_params, check_duration=True,
-                                     randomized=True, fade_out=False,
+                                     test_samples=None, randomized=True, fade_out=False,
                                      load_saved_model=True, s2ag_epoch='best',
                                      make_video=False, save_pkl=False):
 
@@ -1469,6 +1469,9 @@ class Processor(object):
                     buf = txn.get(key)
                     video = pyarrow.deserialize(buf)
                     vid_name = video['vid']
+                    if not(test_samples is None or vid_name in test_samples):
+                        continue
+                    
                     clips = video['clips']
                     n_clips = len(clips)
                     if n_clips == 0:

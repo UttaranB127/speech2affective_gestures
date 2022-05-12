@@ -1142,8 +1142,11 @@ class Processor(object):
 
     def render_clip(self, data_params, vid_name, sample_idx, samples_to_generate,
                     clip_poses, clip_audio, sample_rate, clip_words, clip_time,
-                    clip_idx=0, unit_time=None, speaker_vid_idx=0, check_duration=True,
+                    test_samples=None, clip_idx=0, unit_time=None, speaker_vid_idx=0, check_duration=True,
                     fade_out=False, make_video=False, save_pkl=False):
+        if '{}_{:.2f}_{:.2f}'.format(vid_name, clip_time[0], clip_time[1]) not in test_samples:
+            return [], [], [], []
+        
         start_time = time.time()
         mean_dir_vec = np.squeeze(np.array(self.s2ag_config_args.mean_dir_vec))
 
@@ -1386,8 +1389,7 @@ class Processor(object):
             out_dir_vec_trimodal[start_frame:end_frame] = interpolated_y_trimodal
             out_dir_vec[start_frame:end_frame] = interpolated_y
 
-        filename_prefix = '{}_{}_{}'.format(vid_name, speaker_vid_idx, clip_idx)
-        filename_prefix_for_save = filename_prefix.split('_tensor')[0]
+        filename_prefix = '{}_s{}_{:.2f}_{:.2f}'.format(vid_name, speaker_vid_idx.item(), clip_time[0], clip_time[1])
         sentence_words = []
         for word, _, _ in clip_words:
             sentence_words.append(word)
@@ -1399,7 +1401,7 @@ class Processor(object):
                                                  str(datetime.timedelta(seconds=clip_time[0])),
                                                  str(datetime.timedelta(seconds=clip_time[1])))
             create_video_and_save(
-                self.args.video_save_path, self.best_s2ag_loss_epoch, filename_prefix_for_save, 0, target_dir_vec,
+                self.args.video_save_path, self.best_s2ag_loss_epoch, filename_prefix, 0, target_dir_vec,
                 out_dir_vec_trimodal, out_dir_vec, mean_dir_vec, sentence,
                 audio=clip_audio, aux_str=aux_str, clipping_to_shortest_stream=True,
                 delete_audio_file=False)
@@ -1420,7 +1422,7 @@ class Processor(object):
                 'human_dir_vec': target_dir_vec + mean_dir_vec,
             }
             with open(jn(self.args.video_save_path,
-                         '{}_trimodal.pkl'.format(filename_prefix_for_save)), 'wb') as f:
+                         '{}_trimodal.pkl'.format(filename_prefix)), 'wb') as f:
                 pickle.dump(save_dict, f)
 
             save_dict = {
@@ -1430,7 +1432,7 @@ class Processor(object):
                 'human_dir_vec': target_dir_vec + mean_dir_vec,
             }
             with open(jn(self.args.video_save_path,
-                         '{}.pkl'.format(filename_prefix_for_save)), 'wb') as f:
+                         '{}.pkl'.format(filename_prefix)), 'wb') as f:
                 pickle.dump(save_dict, f)
 
         return clip_poses_resampled, out_poses_trimodal, out_poses
@@ -1476,42 +1478,35 @@ class Processor(object):
                         key = keys[sample_idx]
                     buf = txn.get(key)
                     video = pyarrow.deserialize(buf)
-                    vid_name = video['vid']
+                    vid_name = video[6]['vid']
                     if not(samples is None or any(vid_name in filename_prefix for filename_prefix in samples)):
                         continue
-                    
-                    clips = video['clips']
-                    n_clips = len(clips)
-                    if n_clips == 0:
-                        continue
 
-                    if randomized:
-                        clip_idx = 0
-                        clip_idx = np.random.randint(0, n_clips)
-                        speaker_vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
-                    else:
-                        speaker_vid_idx = 0
-
-                    clip_poses = clips[clip_idx]['skeletons_3d']
-                    clip_audio = clips[clip_idx]['audio_raw']
-                    clip_words = clips[clip_idx]['words']
-                    clip_time = [clips[clip_idx]['start_time'], clips[clip_idx]['end_time']]
-                    clip_frames = [clips[clip_idx]['start_frame_no'], clips[clip_idx]['end_frame_no']]
-
+                    clip_poses = video[1]
+                    clip_audio = video[3]
+                    clip_words = video[0]
+                    clip_frames = [video[6]['start_frame_no'], video[6]['end_frame_no']]
+                    clip_time = [video[6]['start_time'], video[6]['end_time']]
+                        
                     if vid_name != clip_vid_name or clip_frames[0] - 1 > clip_frames_all[1]:
                         if clip_vid_name != '':
+                            if randomized:
+                                speaker_vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
+                            else:
+                                speaker_vid_idx = 0
                             
                             _ = self.render_clip(data_params, vid_name, sample_idx,
                                                 samples_to_generate, clip_poses_all, clip_audio_all,
                                                 data_params['audio_sr'], clip_words_all, clip_time_all,
                                                 test_samples=samples, speaker_vid_idx=speaker_vid_idx,
-                                                check_duration=check_duration, fade_out=fade_out, save_pkl=save_pkl)
+                                                check_duration=check_duration, fade_out=fade_out,
+                                                make_video=make_video, save_pkl=save_pkl)
                         clip_vid_name = vid_name
-                        clip_poses_all = clips[clip_idx]['skeletons_3d']
-                        clip_audio_all = clips[clip_idx]['audio_raw']
-                        clip_words_all = clips[clip_idx]['words']
-                        clip_time_all = [clips[clip_idx]['start_time'], clips[clip_idx]['end_time']]
-                        clip_frames_all = [clips[clip_idx]['start_frame_no'], clips[clip_idx]['end_frame_no']]
+                        clip_poses_all = video[1]
+                        clip_audio_all = video[3]
+                        clip_words_all = video[0]
+                        clip_frames_all = [video[6]['start_frame_no'], video[6]['end_frame_no']]
+                        clip_time_all = [video[6]['start_time'], video[6]['end_time']]
                     else:
                         frame_idx_last = clip_frames[0] - clip_frames_all[0]
                         clip_poses_all = np.concatenate((clip_poses_all[:frame_idx_last], clip_poses), axis=0)

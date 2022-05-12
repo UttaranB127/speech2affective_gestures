@@ -135,15 +135,15 @@ if args.train_s2ag:
 data_params = {}
 check_duration = False
 if args.dataset_test.lower() == 'ted_db':
-    data_params = {'env_file': jn(data_path, 'ted_db/lmdb_test'),
+    data_params = {'env_file': jn(data_path, 'ted_db/lmdb_test_s2ag_v2_cache_mfcc_14'),
                    'clip_duration_range': [5, 30],
                    'audio_sr': 16000}
     check_duration = True
 elif args.dataset_test.lower() == 'genea_challenge_2020':
     data_params = {'data_path': jn(data_path, 'genea_challenge_2020/test')}
 
-samples = ['5QTjSH1KGlY', 'cK74vhqzeeQ', 'E7oq6J8HvKw', 'hfznpykprP0',
-           'luoKOkTxOtU', 'mLufqwmPl1A', 'sEOSCziWuP8', 'yF4MgSh7VO4']
+samples = ['5QTjSH1KGlY_760.32_767.79', 'cK74vhqzeeQ_683.22_695.35', 'E7oq6J8HvKw_216.23_232.37', 'hfznpykprP0_220.88_235.68',
+           'luoKOkTxOtU_246.92_260.39', 'mLufqwmPl1A_646.12_653.59', 'sEOSCziWuP8_807.65_815.79', 'yF4MgSh7VO4_29.24_40.04']
 pr.generate_gestures_by_dataset(dataset=args.dataset_test, data_params=data_params,
                                 randomized=randomized, check_duration=check_duration,
                                 s2ag_epoch=290, samples=samples, make_video=True, save_pkl=True)

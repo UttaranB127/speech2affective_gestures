@@ -146,4 +146,4 @@ samples = ['5QTjSH1KGlY', 'cK74vhqzeeQ', 'E7oq6J8HvKw', 'hfznpykprP0',
            'luoKOkTxOtU', 'mLufqwmPl1A', 'sEOSCziWuP8', 'yF4MgSh7VO4']
 pr.generate_gestures_by_dataset(dataset=args.dataset_test, data_params=data_params,
                                 randomized=randomized, check_duration=check_duration,
-                                s2ag_epoch=290, test_samples=samples, make_video=True, save_pkl=True)
+                                s2ag_epoch=290, samples=samples, make_video=True, save_pkl=True)

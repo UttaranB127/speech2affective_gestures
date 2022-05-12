@@ -1430,13 +1430,13 @@ class Processor(object):
                 'human_dir_vec': target_dir_vec + mean_dir_vec,
             }
             with open(jn(self.args.video_save_path,
-                         '{}.pkl'.format(filename_prefix)), 'wb') as f:
+                         '{}.pkl'.format(filename_prefix_for_save)), 'wb') as f:
                 pickle.dump(save_dict, f)
 
         return clip_poses_resampled, out_poses_trimodal, out_poses
 
     def generate_gestures_by_dataset(self, dataset, data_params, check_duration=True,
-                                     test_samples=None, randomized=True, fade_out=False,
+                                     samples=None, randomized=True, fade_out=False,
                                      load_saved_model=True, s2ag_epoch='best',
                                      make_video=False, save_pkl=False):
 
@@ -1456,11 +1456,19 @@ class Processor(object):
             if 'clip_duration_range' not in data_params.keys():
                 data_params['clip_duration_range'] = [5, 12]
             lmdb_env = lmdb.open(data_params['env_file'], readonly=True, lock=False)
+            clip_vid_name = ''
+            clip_frames_all = [-2, -2]
+
+            lmdb_env = lmdb.open(data_params['env_file'], readonly=True, lock=False)
             with lmdb_env.begin(write=False) as txn:
                 keys = [key for key, _ in txn.cursor()]
                 samples_to_generate = len(keys)
                 print('Total samples to generate: {}'.format(samples_to_generate))
                 for sample_idx in range(samples_to_generate):  # loop until we get the desired number of results
+ 
+                    # if sample_idx < 11200:
+                    #     continue
+
                     # select video
                     if randomized:
                         key = np.random.choice(keys)
@@ -1469,31 +1477,50 @@ class Processor(object):
                     buf = txn.get(key)
                     video = pyarrow.deserialize(buf)
                     vid_name = video['vid']
-                    if not(test_samples is None or vid_name in test_samples):
+                    if not(samples is None or any(vid_name in filename_prefix for filename_prefix in samples)):
                         continue
                     
                     clips = video['clips']
                     n_clips = len(clips)
                     if n_clips == 0:
                         continue
+
                     if randomized:
+                        clip_idx = 0
                         clip_idx = np.random.randint(0, n_clips)
                         speaker_vid_idx = np.random.randint(0, self.test_speaker_model.n_words)
                     else:
-                        clip_idx = 0
                         speaker_vid_idx = 0
 
                     clip_poses = clips[clip_idx]['skeletons_3d']
                     clip_audio = clips[clip_idx]['audio_raw']
                     clip_words = clips[clip_idx]['words']
                     clip_time = [clips[clip_idx]['start_time'], clips[clip_idx]['end_time']]
-                    clip_poses_resampled, out_poses_trimodal, out_poses =\
-                        self.render_clip(data_params, vid_name, sample_idx,
-                                         samples_to_generate, clip_poses, clip_audio,
-                                         data_params['audio_sr'], clip_words, clip_time,
-                                         clip_idx=clip_idx, speaker_vid_idx=speaker_vid_idx,
-                                         check_duration=check_duration, fade_out=fade_out,
-                                         make_video=make_video, save_pkl=save_pkl)
+                    clip_frames = [clips[clip_idx]['start_frame_no'], clips[clip_idx]['end_frame_no']]
+
+                    if vid_name != clip_vid_name or clip_frames[0] - 1 > clip_frames_all[1]:
+                        if clip_vid_name != '':
+                            
+                            _ = self.render_clip(data_params, vid_name, sample_idx,
+                                                samples_to_generate, clip_poses_all, clip_audio_all,
+                                                data_params['audio_sr'], clip_words_all, clip_time_all,
+                                                test_samples=samples, speaker_vid_idx=speaker_vid_idx,
+                                                check_duration=check_duration, fade_out=fade_out, save_pkl=save_pkl)
+                        clip_vid_name = vid_name
+                        clip_poses_all = clips[clip_idx]['skeletons_3d']
+                        clip_audio_all = clips[clip_idx]['audio_raw']
+                        clip_words_all = clips[clip_idx]['words']
+                        clip_time_all = [clips[clip_idx]['start_time'], clips[clip_idx]['end_time']]
+                        clip_frames_all = [clips[clip_idx]['start_frame_no'], clips[clip_idx]['end_frame_no']]
+                    else:
+                        frame_idx_last = clip_frames[0] - clip_frames_all[0]
+                        clip_poses_all = np.concatenate((clip_poses_all[:frame_idx_last], clip_poses), axis=0)
+                        clip_audio_all = np.concatenate((clip_audio_all[:int((clip_time[0] - clip_time_all[0]) * 16000)], clip_audio))
+                        for word in clip_words:
+                            if word not in clip_words_all:
+                                clip_words_all.append(word)
+                        clip_frames_all[1] = clip_frames[1]
+                        clip_time_all[1] = clip_time[1]
 
         elif dataset.lower() == 'genea_challenge_2020':
             file_names = ['.wav'.join(f.split('.wav')[:-1]) for f in os.listdir(jn(data_params['data_path'], 'audio'))]

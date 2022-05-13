@@ -1432,7 +1432,7 @@ class Processor(object):
                 'human_dir_vec': target_dir_vec + mean_dir_vec,
             }
             with open(jn(self.args.video_save_path,
-                         '{}.pkl'.format(filename_prefix)), 'wb') as f:
+                         '{}_s2ag.pkl'.format(filename_prefix)), 'wb') as f:
                 pickle.dump(save_dict, f)
 
         return clip_poses_resampled, out_poses_trimodal, out_poses

@@ -12,14 +12,15 @@ import processor_v2 as processor
 
 from os.path import join as jn
 
-from config.parse_args import parse_args
+from parse_args import parse_args
 
 warnings.filterwarnings('ignore')
 
 
 # base_path = os.path.dirname(os.path.realpath(__file__))
-base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
-data_path = jn(base_path, '../../data')
+# base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
+base_path = '/mnt/w/Gamma/Gestures/s2ag/speech2affective_gestures'
+data_path = jn(base_path, '../data')
 
 models_s2ag_path = jn(base_path, 'models', 's2ag_v2_mfcc_run_3')
 

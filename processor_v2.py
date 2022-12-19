@@ -1463,9 +1463,12 @@ class Processor(object):
 
             lmdb_env = lmdb.open(data_params['env_file'], readonly=True, lock=False)
             with lmdb_env.begin(write=False) as txn:
-                keys = [key for key, _ in txn.cursor()]
+                keys = []
+                for key_idx, (key, _) in enumerate(txn.cursor()):
+                    keys.append(key)
+                    print('\rExtracting sample key {}'.format(key_idx), end='')
+                print('\rSample keys extracted')
                 samples_to_generate = len(keys)
-                print('Total samples to generate: {}'.format(samples_to_generate))
                 for sample_idx in range(samples_to_generate):  # loop until we get the desired number of results
  
                     # if sample_idx < 11200:

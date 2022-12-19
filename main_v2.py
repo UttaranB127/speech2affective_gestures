@@ -72,7 +72,7 @@ parser.add_argument('--lr-s2ag-decay', type=float, default=0.999, metavar='LRD-s
                     help='learning rate decay for s2ag (default: 0.999)')
 parser.add_argument('--gradient-clip', type=float, default=0.1, metavar='GC',
                     help='gradient clip threshold (default: 0.1)')
-parser.add_argument('--nesterov', action='store_true', default=True,
+parser.add_argument('--nesterov', type=str2bool, default=True,
                     help='use nesterov')
 parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                     help='momentum (default: 0.9)')

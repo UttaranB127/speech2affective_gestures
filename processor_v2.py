@@ -90,10 +90,9 @@ class Processor(object):
 
     def __init__(self, base_path, args, s2ag_config_args, data_loader, pose_dim, coords,
                  audio_sr, min_train_epochs=20, zfill=6):
-        self.device = torch.device('cuda:{}'.format(torch.cuda.current_device())
-                                   if torch.cuda.is_available() else 'cpu')
         self.base_path = base_path
         self.args = args
+        self.device = torch.device('cpu' if self.args.no_cuda or not torch.cuda.is_available() else 'cuda:{}'.format(torch.cuda.current_device()))
         self.s2ag_config_args = s2ag_config_args
         self.data_loader = data_loader
         self.result = dict()

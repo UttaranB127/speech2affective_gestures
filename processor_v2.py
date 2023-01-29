@@ -189,13 +189,13 @@ class Processor(object):
             print('Training s2ag with batch size:\t{:>6}'.format(self.args.batch_size))
             train_dir_name = jn(npz_path, 'train')
             if not os.path.exists(train_dir_name):
-                self.save_cache('train', train_dir_name)
+                self.save_cache('train', os.path.dirname(train_dir_name))
             self.load_cache('train', train_dir_name)
             print('Total s2ag validation data:\t\t{:>6} ({:.2f}%)'.format(
                 self.num_val_samples, 100. * self.num_val_samples / self.num_total_samples))
             val_dir_name = jn(npz_path, 'val')
             if not os.path.exists(val_dir_name):
-                self.save_cache('val', val_dir_name)
+                self.save_cache('val', os.path.dirname(val_dir_name))
             self.load_cache('val', val_dir_name)
         else:
             self.train_samples = None
@@ -206,7 +206,7 @@ class Processor(object):
             self.num_test_samples, 100. * self.num_test_samples / self.num_total_samples))
         test_dir_name = jn(npz_path, 'test')
         if not os.path.exists(test_dir_name):
-            self.save_cache('test', test_dir_name)
+            self.save_cache('test', os.path.dirname(test_dir_name))
 
         self.lr_s2ag_gen = self.s2ag_config_args.learning_rate
         self.lr_s2ag_dis = self.s2ag_config_args.learning_rate * self.s2ag_config_args.discriminator_lr_weight
@@ -319,7 +319,9 @@ class Processor(object):
             mfcc_features_all[k] = mfcc_features
             vid_indices_all[k] = speaker_model.word2index[aux_info['vid']]
             
-            np.savez_compressed(jn(dir_name, part, str(k).zfill(6) + '.npz'),
+            part_save_dir = jn(dir_name, part)
+            os.makedirs(part_save_dir, exist_ok=True)
+            np.savez_compressed(jn(part_save_dir, str(k).zfill(6) + '.npz'),
                                 extended_word_seq=extended_word_seq,
                                 vec_seq=vec_seq,
                                 audio=np.int16(audio / audio_max_all[k] * 32767),

@@ -38,15 +38,14 @@ conda activate s2ag-env
 sudo apt-get update && sudo apt-get install espeak
 ```
 
-4. Install the package requirements.
+4. Install PyTorch following the [official instructions](https://pytorch.org/).
+
+5. Install all other package requirements.
 
 ```
 pip install -r requirements.txt
 ```
-Note: You might need to manually uninstall and reinstall `matplotlib` and `kiwisolver` for them to work.
-
-5. Install PyTorch following the [official instructions](https://pytorch.org/).
-Note: You might need to manually uninstall and reinstall `numpy` for `torch` to work.
+Note: You might need to manually uninstall and reinstall `numpy` for `torch` to work. You might need to manually uninstall and reinstall `matplotlib` and `kiwisolver` for them to work.
 
 ## Downloading the datasets
 1. The Ted Gestures dataset is available for download [here](https://kaistackr-my.sharepoint.com/:u:/g/personal/zeroyy_kaist_ac_kr/EYAPLf8Hvn9Oq9GMljHDTK4BRab7rl9hAOcnjkriqL8qSg), originally hosted at [https://github.com/ai4r/Gesture-Generation-from-Trimodal-Context](https://github.com/ai4r/Gesture-Generation-from-Trimodal-Context).

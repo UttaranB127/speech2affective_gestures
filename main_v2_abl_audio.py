@@ -17,13 +17,6 @@ from config.parse_args import parse_args
 warnings.filterwarnings('ignore')
 
 
-# base_path = os.path.dirname(os.path.realpath(__file__))
-base_path = '/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures'
-data_path = j(base_path, '../../data')
-
-models_s2ag_path = j(base_path, 'models', 's2ag_v2_abl_audio')
-
-
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -36,13 +29,14 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
+parser.add_argument('-b', '--base-apth', required=True, type='str', help='Root directory of data files')
+parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--dataset-s2ag', type=str, default='ted_db', metavar='D-S2G',
                     help='dataset to train and validate speech to emotive gestures (default: ted)')
 parser.add_argument('-dap', '--dataset-s2ag-already-processed',
                     help='Optional. Set to True if dataset has already been processed.' +
                          'If not, or if you are not sure, set it to False.',
                     type=str2bool, default=True)
-parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--frame-drop', type=int, default=2, metavar='FD',
                     help='frame down-sample rate (default: 2)')
 parser.add_argument('--train-s2ag', type=str2bool, default=True, metavar='T-s2ag',
@@ -102,6 +96,8 @@ parser.add_argument('--save-log', action='store_true', default=True,
 # TO ADD: save_result
 
 args = parser.parse_args()
+data_path = j(args.base_path, '..', 'data')
+models_s2ag_path = j(args.base_path, 'models', 's2ag_v2_abl_audio')
 args.data_path = data_path
 randomized = False
 
@@ -110,9 +106,9 @@ s2ag_config_args = parse_args(args.config)
 args.work_dir_s2ag = j(models_s2ag_path, args.dataset_s2ag)
 os.makedirs(args.work_dir_s2ag, exist_ok=True)
 
-args.video_save_path = j(base_path, 'outputs', 'videos_trimodal_style')
+args.video_save_path = j(args.base_path, 'outputs', 'videos_trimodal_style')
 os.makedirs(args.video_save_path, exist_ok=True)
-args.quantitative_save_path = j(base_path, 'outputs', 'quantitative')
+args.quantitative_save_path = j(args.base_path, 'outputs', 'quantitative')
 os.makedirs(args.quantitative_save_path, exist_ok=True)
 
 train_data_ted, val_data_ted, test_data_ted = loader.load_ted_db_data(data_path, s2ag_config_args)
@@ -122,7 +118,7 @@ pose_dim = 27
 coords = 3
 audio_sr = 16000
 
-pr = processor.Processor(base_path, args, s2ag_config_args, data_loader, pose_dim, coords, audio_sr)
+pr = processor.Processor(args.base_path, args, s2ag_config_args, data_loader, pose_dim, coords, audio_sr)
 
 if args.train_s2ag:
     pr.train()

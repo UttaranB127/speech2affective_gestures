@@ -11,6 +11,9 @@
             "program": "main_v2.py",
             "console": "integratedTerminal",
             "args": [
+                        // "--base_path",  ".",
+                        // "--base_path", "/mnt/q/Gamma/Gestures/src/Speech2Gestures/speech2affective_gestures",
+                        "--base_path", "/mnt/w/Gamma/Gestures/s2ag/speech2affective_gestures",
                         "--config", "config/multimodal_context_v2_mauve_ws.yml",
                         "--train-s2ag", "False"
                     ]

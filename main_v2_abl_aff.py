@@ -29,7 +29,7 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='Speech to Emotive Gestures')
-parser.add_argument('-b', '--base-apth', required=True, type='str', help='Root directory of data files')
+parser.add_argument('-b', '--base-path', required=True, type=str, help='Root directory of data files')
 parser.add_argument('-c', '--config', required=True, is_config_file=True, help='Config file path')
 parser.add_argument('--dataset-s2ag', type=str, default='ted_db', metavar='D-S2G',
                     help='dataset to train and validate speech to emotive gestures (default: ted)')
